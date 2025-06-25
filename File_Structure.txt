@@ -1,0 +1,54 @@
+﻿CannaVille/
+├── index.html
+├── css/
+│   ├── main.css
+│   └── ui.css
+├── js/
+│   ├── main.js
+│   ├── plant-generator.js
+│   ├── avatar-system.js
+│   ├── ai-environments.js
+│   ├── cv-plant-engine.js
+│   └── smart-room-ai.js
+├── assets/
+│   ├── models/
+│   │   ├── avatars/
+│   │   │   ├── male_caucasian.glb
+│   │   │   ├── female_caucasian.glb
+│   │   │   ├── male_african.glb
+│   │   │   ├── female_african.glb
+│   │   │   ├── male_asian.glb
+│   │   │   ├── female_asian.glb
+│   │   │   ├── male_hispanic.glb
+│   │   │   └── female_hispanic.glb
+│   │   ├── plants/
+│   │   │   ├── seedling.glb
+│   │   │   ├── vegetative.glb
+│   │   │   ├── flowering.glb
+│   │   │   └── harvest.glb
+│   │   └── equipment/
+│   │       ├── dwc_bucket.glb
+│   │       ├── led_light.glb
+│   │       └── tent_walls.glb
+│   ├── textures/
+│   │   ├── ai_generated/
+│   │   │   ├── grass_seamless.jpg
+│   │   │   ├── soil_texture.jpg
+│   │   │   ├── mylar_wall.jpg
+│   │   │   └── cannabis_bud.jpg
+│   │   └── materials/
+│   ├── sounds/
+│   │   ├── ambient_farm.mp3
+│   │   ├── water_sound.mp3
+│   │   └── harvest_sound.mp3
+│   └── shaders/
+│       ├── trichome.frag
+│       └── plant_growth.vert
+├── api/
+│   ├── ai-texture-generator.py
+│   ├── plant-cv-analyzer.py
+│   └── environment-optimizer.py
+├── server.js
+├── package.json
+├── requirements.txt
+└── deploy.sh
