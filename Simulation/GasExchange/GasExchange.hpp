@@ -73,6 +73,9 @@ struct GasExchangeState {
     units::AssimilationMicromolesPerSquareMeterSecond net_assimilation{0.0};
     units::IntercellularCO2MicromolesPerMole intercellular_co2{0.0};
     units::StomatalConductanceMolesPerSquareMeterSecond stomatal_conductance{0.0};
+    double g1_reference{0.0};
+    double g1_effective{0.0};
+    double beta_hydraulic{1.0};
     ConvergenceStatus status{ConvergenceStatus::NotRun};
     std::string profile_id;
 };
@@ -97,7 +100,8 @@ void solve_coupled_gas_exchange(
     units::CO2MicromolesPerMole ambient_co2,
     units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
-    units::AtmosphericPressureKPa pressure
+    units::AtmosphericPressureKPa pressure,
+    double beta_hydraulic = 1.0
 );
 
 } // namespace cannaville::gasexchange

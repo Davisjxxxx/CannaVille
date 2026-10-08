@@ -76,9 +76,13 @@ void solve_coupled_gas_exchange(
     units::CO2MicromolesPerMole ambient_co2,
     units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
-    units::AtmosphericPressureKPa pressure
+    units::AtmosphericPressureKPa pressure,
+    double beta_hydraulic
 ) {
     state.profile_id = profile.id;
+    state.beta_hydraulic = std::clamp(beta_hydraulic, 0.0, 1.0);
+    state.g1_reference = profile.medlyn.g1;
+    state.g1_effective = state.g1_reference * state.beta_hydraulic;
 
     if (!profile.is_configured) {
         state.status = ConvergenceStatus::MissingCalibrationProfile;
@@ -92,7 +96,6 @@ void solve_coupled_gas_exchange(
         state.status = ConvergenceStatus::NegativeVPD;
         return;
     }
-
 
     double tk = leaf_temperature->value + 273.15;
     double tref = profile.fvcb.t_ref_k;
@@ -132,7 +135,7 @@ void solve_coupled_gas_exchange(
     
     double D = std::max(kMedlynMinimumVPDKPa, leaf_to_air_vpd.value); // Prevent division by zero and unrealistic infinite conductance at near-zero VPD
     double g0 = profile.medlyn.g0;
-    double g1 = profile.medlyn.g1;
+    double g1 = state.g1_effective;
     
     double An = 0.0;
     double gsw = 0.0;

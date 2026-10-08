@@ -1,4 +1,5 @@
 #include "Simulation/Transpiration/Transpiration.hpp"
+#include "Simulation/RootZone/HydraulicLimitation.hpp"
 #include "Simulation/Core/DeterministicRng.hpp"
 #include "Simulation/Core/Scenario.hpp"
 #include "Simulation/Core/Simulation.hpp"
@@ -777,6 +778,115 @@ void test_rootzone_ledger_serialization() {
     restored.load_serialized_state(serialized);
     require(restored.serialize_state() == serialized, "roundtrip exact");
 }
+
+void test_hydraulic_limitation() {
+    using namespace cannaville::rootzone;
+    
+    // 1. van Genuchten reference
+    auto profile_a = get_synthetic_substrate_test_profile_a();
+    HydraulicState s;
+    evaluate_van_genuchten(0.3, profile_a, s);
+    if (s.status != HydraulicStatus::Valid) throw std::runtime_error("vg ref fail");
+    
+    // 2. theta = theta_s
+    evaluate_van_genuchten(0.60, profile_a, s);
+    if (s.status != HydraulicStatus::Valid || s.effective_saturation != 1.0) throw std::runtime_error("vg theta_s fail");
+    if (s.matric_potential_mpa != 0.0) throw std::runtime_error("vg theta_s mpa fail");
+
+    // 3. theta near theta_r
+    evaluate_van_genuchten(0.051, profile_a, s);
+    if (s.status != HydraulicStatus::Valid || s.matric_potential_mpa >= -0.01) throw std::runtime_error("vg near theta_r fail");
+
+    // 4. outside supported domain
+    evaluate_van_genuchten(0.04, profile_a, s);
+    if (s.status != HydraulicStatus::OutsideRetentionModelDomain) throw std::runtime_error("vg outside domain fail");
+
+    // 5. invalid theta_r/theta_s
+    auto bad_prof = profile_a;
+    bad_prof.theta_r_m3_m3 = 0.6;
+    bad_prof.theta_s_m3_m3 = 0.5;
+    evaluate_van_genuchten(0.55, bad_prof, s);
+    if (s.status != HydraulicStatus::NumericalFailure) throw std::runtime_error("vg bad theta fail");
+
+    // 6. invalid alpha/n
+    bad_prof = profile_a;
+    bad_prof.n = 0.5;
+    evaluate_van_genuchten(0.3, bad_prof, s);
+    if (s.status != HydraulicStatus::NumericalFailure) throw std::runtime_error("vg bad n fail");
+
+    // 7. distinct profiles produce different potentials
+    auto profile_b = get_synthetic_substrate_test_profile_b();
+    HydraulicState sb;
+    evaluate_van_genuchten(0.3, profile_b, sb);
+    evaluate_van_genuchten(0.3, profile_a, s);
+    if (s.matric_potential_mpa == sb.matric_potential_mpa) throw std::runtime_error("vg distinct profiles fail");
+
+    // 8. synthetic psi -> beta
+    auto stress_prof = get_synthetic_stress_test_profile();
+    evaluate_beta_hydraulic(-1.5, stress_prof, s);
+    if (s.status != HydraulicStatus::Valid || s.beta_hydraulic != 0.5) throw std::runtime_error("beta synthetic fail");
+
+    // 9. missing beta profile
+    auto miss_stress = get_missing_stress_profile();
+    evaluate_beta_hydraulic(-1.5, miss_stress, s);
+    if (s.status != HydraulicStatus::MissingHydraulicStressCalibration) throw std::runtime_error("missing beta fail");
+
+    // 10. missing retention
+    auto miss_sub = get_missing_substrate_profile();
+    evaluate_van_genuchten(0.3, miss_sub, s);
+    if (s.status != HydraulicStatus::MissingSubstrateHydraulicProfile) throw std::runtime_error("missing sub fail");
+
+    // 11-13 Medlyn integration
+    auto eff = apply_hydraulic_limitation_to_medlyn(3.0, 1.0);
+    if (eff.g1_effective != 3.0) throw std::runtime_error("medlyn beta=1 fail");
+    eff = apply_hydraulic_limitation_to_medlyn(3.0, 0.5);
+    if (eff.g1_effective != 1.5) throw std::runtime_error("medlyn beta=0.5 fail");
+    eff = apply_hydraulic_limitation_to_medlyn(3.0, 0.0);
+    if (eff.g1_effective != 0.0) throw std::runtime_error("medlyn beta=0 fail");
+
+    // 14-17 DWC policy
+    auto dwc = compute_dwc_hydraulic_limitation(true, false, true);
+    if (dwc.status != HydraulicStatus::UnrestrictedWaterAccess || dwc.beta_hydraulic != 1.0) throw std::runtime_error("dwc unrestricted fail");
+    
+    dwc = compute_dwc_hydraulic_limitation(false, false, true);
+    if (dwc.status != HydraulicStatus::InsufficientRootzoneWater || dwc.beta_hydraulic != 0.0) throw std::runtime_error("dwc shortage fail");
+
+    dwc = compute_dwc_hydraulic_limitation(true, true, true);
+    if (dwc.status != HydraulicStatus::HydraulicStateUnavailable || dwc.beta_hydraulic != 1.0) throw std::runtime_error("dwc geometry fail");
+
+    // Scenario A: two substrates identical VWC
+    if (s.matric_potential_mpa == sb.matric_potential_mpa) throw std::runtime_error("scenario A fail");
+    
+    // Scenario B: Dry down reduces beta
+    auto s1 = compute_substrate_hydraulic_limitation(0.5, profile_a, stress_prof);
+    auto s2 = compute_substrate_hydraulic_limitation(0.08, profile_a, stress_prof);
+    if (s1.beta_hydraulic <= s2.beta_hydraulic) throw std::runtime_error("scenario B fail");
+
+    // Scenario C: mid-step irrigation
+    {
+        SubstrateContainer sc(cannaville::units::VolumeCubicMeters{1.0}, cannaville::units::VolumeCubicMeters{0.1});
+        auto st_before = compute_substrate_hydraulic_limitation(sc.volumetric_water_content(), profile_a, stress_prof);
+        sc.irrigate(cannaville::units::VolumeCubicMeters{0.4});
+        auto st_after = compute_substrate_hydraulic_limitation(sc.volumetric_water_content(), profile_a, stress_prof);
+        if (st_before.beta_hydraulic >= st_after.beta_hydraulic && st_before.beta_hydraulic < 1.0) throw std::runtime_error("Scenario C fail");
+    }
+
+    // Scenario D: DWC reservoir loses substantial volume while explicitly maintaining unrestricted water access.
+    {
+        HydroponicReservoir dwc_res(cannaville::units::VolumeCubicMeters{10.0}, cannaville::units::VolumeCubicMeters{10.0});
+        auto dwc_before = compute_dwc_hydraulic_limitation(dwc_res.current_water().value > 0.0, false, true);
+        dwc_res.withdraw_transpiration(cannaville::units::WaterFluxMolesPerSquareMeterSecond{100.0}, cannaville::units::AreaSquareMeters{1.0}, cannaville::units::Seconds{3600.0});
+        auto dwc_after = compute_dwc_hydraulic_limitation(dwc_res.current_water().value > 0.0, false, true);
+        if (dwc_before.beta_hydraulic != 1.0 || dwc_after.beta_hydraulic != 1.0) throw std::runtime_error("Scenario D fail");
+    }
+
+    // Sweep for robustness
+    for (double vwc = 0.0; vwc <= 1.0; vwc += 0.01) {
+        auto st = compute_substrate_hydraulic_limitation(vwc, profile_a, stress_prof);
+        if (st.status == HydraulicStatus::NumericalFailure) throw std::runtime_error("sweep numerical failure");
+    }
+}
+
 int main() {
     try {
         test_deterministic_repeated_runs();
@@ -802,6 +912,7 @@ int main() {
         test_rootzone_unit_conversion();
         test_rootzone_robustness_sweep();
         test_rootzone_ledger_serialization();
+    test_hydraulic_limitation();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
@@ -824,7 +935,8 @@ int main() {
                   << "PASS: rootzone exact event timing\n"
                   << "PASS: rootzone unit conversion\n"
                   << "PASS: rootzone robustness sweep\n"
-                  << "PASS: rootzone ledger serialization\n";
+                  << "PASS: rootzone ledger serialization\n"
+                  << "PASS: hydraulic limitation\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
