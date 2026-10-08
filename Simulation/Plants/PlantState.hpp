@@ -11,6 +11,7 @@
 #include "Simulation/Pests/PestState.hpp"
 #include "Simulation/RootZone/RootZoneState.hpp"
 #include "Simulation/Treatments/TreatmentState.hpp"
+#include "Simulation/GasExchange/GasExchange.hpp"
 
 #include <cstdint>
 #include <string>
@@ -31,10 +32,12 @@ struct PlantLocation {
     units::Meters z;
 };
 
+
 // Latent state is the eventual biological source of truth. Only identity and
 // an explicit placeholder stage exist until governed models are added.
 struct PlantLatentState {
     GrowthStage growth_stage{GrowthStage::Seedling};
+    gasexchange::GasExchangeState gas_exchange;
 };
 
 struct PlantObservableState {

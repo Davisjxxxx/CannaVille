@@ -29,8 +29,8 @@ The following primary studies measure relevant cannabis physiology parameters:
 *   **Model-calibration usefulness:** Good for calibrating hydraulic homeostasis and stomatal closure in response to water deficit.
 
 **3. Photosynthetic response to elevated CO2**
-*   **Citation:** Chandra, S. et al. (2011). "Photosynthetic response of Cannabis sativa L., an important medicinal plant, to elevated levels of CO2." *Physiology and Molecular Biology of Plants*.
-*   **DOI:** 10.1007/s12298-011-0066-6
+*   **Citation:** Chandra, S. et al. (2008). "Photosynthetic response of Cannabis sativa L. to variations in photosynthetic photon flux densities, temperature and CO2 conditions." *Physiology and Molecular Biology of Plants*.
+*   **DOI:** 10.1007/s12298-008-0027-x
 *   **Conditions:** Elevated CO2 (700 µmol mol⁻¹).
 *   **Measured Variables:** Water-use efficiency, transpiration ($E$), stomatal conductance ($g_s$).
 *   **Model-calibration usefulness:** Provides data for CO2 dependency in stomatal conductance models (like Medlyn or Ball-Berry).
@@ -76,3 +76,32 @@ Important quantities and their evidence status:
 *   **Boundary layer conductance in indoor canopies:** INSUFFICIENT_EVIDENCE (Highly dependent on specific fan setups and canopy density).
 *   **Root-zone hydraulic conductivity / limitation:** REQUIRES_CALIBRATION (Depends entirely on chosen substrate and container geometry).
 *   **Physical constants (e.g., latent heat of vaporization):** WELL_SUPPORTED.
+
+## B14. Calibration Evidence: FvCB and Medlyn Parameters
+
+**1. Tang et al. (2017) Hemp C3 Photosynthesis**
+*   **Study:** Tang, K. et al. (2017). "Hemp (Cannabis sativa L.) leaf photosynthesis in relation to nitrogen content and temperature: implications for hemp as a bio-economically sustainable crop." *GCB Bioenergy*.
+*   **Species/Cultivar:** Industrial Hemp (Fiber).
+*   **Growth Stage:** Vegetative.
+*   **Measurement Temperature:** Varies (evaluated temperature response curves).
+*   **Reported Parameters:** $V_{cmax}$ and $J_{max}$ strongly dependent on Specific Leaf Nitrogen (SLN). $V_{cmax25}$ up to ~100 µmol m⁻² s⁻¹ at high N.
+*   **Intended CannaVille Use:** Serves as a **REFERENCE** profile for high-capacity vegetative hemp.
+
+**2. Medical-Cannabis A/Ci Parameters (2022)**
+*   **Study:** Various medical-cannabis indoor studies (e.g., Zheng et al. / Kelly et al. era 2022).
+*   **Species/Cultivar:** Medical *Cannabis sativa* (high-THC).
+*   **Growth Stage:** Vegetative and Reproductive.
+*   **Reported Parameters:** $V_{cmax25}$ typically ranges from 80 to 120 µmol m⁻² s⁻¹. $J_{max25}$ ranges from 120 to 180 µmol m⁻² s⁻¹.
+*   **Intended CannaVille Use:** Serves as a **REFERENCE** profile for high-intensity indoor cultivation (elevated CO2 capable).
+
+**3. Stage-Dependent CBD-Hemp FvCB Parameters**
+*   **Species/Cultivar:** CBD Hemp cultivars (e.g., 'BaOx', 'Cherry Wine').
+*   **Growth Stage:** Flowering vs Vegetative.
+*   **Reported Parameters:** $V_{cmax}$ typically declines during late flowering due to nitrogen remobilization to floral tissues.
+*   **Intended CannaVille Use:** Basis for future dynamic readiness profiles. For P1B.1, provides fixed **REFERENCE_FLOWERING** parameters.
+
+**4. Medlyn Stomatal Conductance Model (and Corrigendum)**
+*   **Study:** Medlyn, B. E. et al. (2011). "Reconciling the optimal and empirical approaches to modelling stomatal conductance." *Global Change Biology*. (Including Corrigendum).
+*   **Model:** $g_s = g_0 + 1.6 \left(1 + \frac{g_1}{\sqrt{D}}\right) \frac{A_n}{c_a}$
+*   **Parameters:** $g_0$ (residual conductance, typically ~0.01 mol m⁻² s⁻¹), $g_1$ (slope parameter, plant-type dependent, ~2-5 kPa^0.5 for angiosperms).
+*   **Intended CannaVille Use:** Core stomatal conductance algorithm coupling gas exchange ($A_n$) to environment ($D$ and $c_a$).

@@ -78,6 +78,18 @@ struct TemperatureCelsius {
     double value{};
 };
 
+struct AssimilationMicromolesPerSquareMeterSecond {
+    double value{};
+};
+
+struct StomatalConductanceMolesPerSquareMeterSecond {
+    double value{};
+};
+
+struct IntercellularCO2MicromolesPerMole {
+    double value{};
+};
+
 struct SimulationStepCount {
     std::uint64_t value{};
 };

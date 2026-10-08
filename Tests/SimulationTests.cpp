@@ -321,6 +321,67 @@ void test_sub_timestep_boundaries() {
     require_near(state.dli.value, (100 * 100) / 1e6, 1e-12, "day rollover inside timestep DLI");
 }
 
+#include "Simulation/GasExchange/GasExchange.hpp"
+
+void test_gas_exchange() {
+    using namespace cannaville::gasexchange;
+    using namespace cannaville::units;
+    
+    GasExchangeState state;
+    auto tang_profile = get_tang2017_reference_profile();
+    auto med_profile = get_medical2022_reference_profile();
+    auto unconfigured = get_unconfigured_profile();
+
+    // 1. Missing calibration profile
+    solve_coupled_gas_exchange(state, unconfigured, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    require(state.status == ConvergenceStatus::MissingCalibrationProfile, "Failed to reject unconfigured profile");
+
+    // 2. Missing leaf temperature
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, std::nullopt, AtmosphericPressureKPa{101.325});
+    require(state.status == ConvergenceStatus::MissingLeafTemperature, "Failed to handle missing leaf temperature");
+
+    // 3. Zero/near-zero light behavior
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{0}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    require(state.status == ConvergenceStatus::Converged, "Zero light failed to converge");
+    require(state.net_assimilation.value < 0.0, "Zero light assimilation must be negative (respiration)");
+    require_near(state.stomatal_conductance.value, tang_profile.medlyn.g0, 1e-5, "Zero light conductance should approach g0");
+
+    // 4. Increasing PPFD response
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{100}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double an_low_light = state.net_assimilation.value;
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double an_high_light = state.net_assimilation.value;
+    require(an_high_light > an_low_light, "Assimilation did not increase with PPFD");
+
+    // 5. Changing ambient CO2
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{800}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double an_high_co2 = state.net_assimilation.value;
+    require(an_high_co2 > an_high_light, "Assimilation did not increase with CO2");
+
+    // 6. Changing VPD
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{3.0}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double gsw_high_vpd = state.stomatal_conductance.value;
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.0}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double gsw_low_vpd = state.stomatal_conductance.value;
+    require(gsw_high_vpd < gsw_low_vpd, "Conductance did not decrease with higher VPD");
+
+    // 7. Changing leaf temperature
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{15}, AtmosphericPressureKPa{101.325});
+    double an_low_temp = state.net_assimilation.value;
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double an_opt_temp = state.net_assimilation.value;
+    require(an_opt_temp > an_low_temp, "Assimilation did not increase at optimal temperature compared to low temp");
+
+    // 8. Two different calibration profiles
+    solve_coupled_gas_exchange(state, med_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double an_med = state.net_assimilation.value;
+    require(an_med != an_opt_temp, "Two different calibration profiles yielded identical assimilation");
+
+    // 9. Negative VPD behavior
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{-1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    require(state.status == ConvergenceStatus::NegativeVPD, "Failed to handle negative VPD");
+}
+
 void test_spatial_physics_and_cli_fields() {
     const auto scenario = cannaville::core::Scenario::load_json(p1a_json);
     cannaville::core::Simulation simulation(scenario, 5);
@@ -366,6 +427,7 @@ int main() {
         test_dli_and_photoperiod_accumulation();
         test_sub_timestep_boundaries();
         test_spatial_physics_and_cli_fields();
+        test_gas_exchange();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
@@ -376,7 +438,8 @@ int main() {
                   << "PASS: vapor pressure, air VPD, and leaf VPD semantics\n"
                   << "PASS: DLI, photoperiod, and dark-interval accumulation\n"
                   << "PASS: sub-timestep boundary integration\n"
-                  << "PASS: spatial physics and CSV inspection fields\n";
+                  << "PASS: spatial physics and CSV inspection fields\n"
+                  << "PASS: gas exchange models\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

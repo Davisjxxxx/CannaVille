@@ -229,6 +229,13 @@ json::Value plant_json(const plants::PlantState& plant) {
         })},
         {"latent", json::Value(json::Value::Object{
             {"growth_stage", string_value(stage_to_string(plant.latent.growth_stage))},
+            {"gas_exchange", json::Value({
+                {"net_assimilation", number(plant.latent.gas_exchange.net_assimilation.value)},
+                {"intercellular_co2", number(plant.latent.gas_exchange.intercellular_co2.value)},
+                {"stomatal_conductance", number(plant.latent.gas_exchange.stomatal_conductance.value)},
+                {"status", number(static_cast<double>(plant.latent.gas_exchange.status))},
+                {"profile_id", string_value(plant.latent.gas_exchange.profile_id)}
+            })}
         })},
         {"observable", json::Value({
             {"displayed_growth_stage", string_value(stage_to_string(plant.observable.displayed_growth_stage))},
@@ -291,7 +298,17 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     plant.curing.active = bool_field(curing, "active");
     plant.curing.elapsed.value = number_field(curing, "elapsed_s");
     plant.curing.quality_model_initialized = bool_field(curing, "quality_model_initialized");
-    plant.latent.growth_stage = stage_from_string(string_field(object.require("latent"), "growth_stage"));
+    const auto& latent = object.require("latent");
+    plant.latent.growth_stage = stage_from_string(string_field(latent, "growth_stage"));
+    const auto* ge_ptr = latent.is_object() ? latent.find("gas_exchange") : nullptr;
+    if (ge_ptr) {
+        const auto& ge = *ge_ptr;
+        plant.latent.gas_exchange.net_assimilation.value = number_field(ge, "net_assimilation");
+        plant.latent.gas_exchange.intercellular_co2.value = number_field(ge, "intercellular_co2");
+        plant.latent.gas_exchange.stomatal_conductance.value = number_field(ge, "stomatal_conductance");
+        plant.latent.gas_exchange.status = static_cast<gasexchange::ConvergenceStatus>(number_field(ge, "status"));
+        plant.latent.gas_exchange.profile_id = string_field(ge, "profile_id");
+    }
     const auto& observable = object.require("observable");
     plant.observable.displayed_growth_stage = stage_from_string(string_field(observable, "displayed_growth_stage"));
     plant.observable.interaction_available = bool_field(observable, "interaction_available");
