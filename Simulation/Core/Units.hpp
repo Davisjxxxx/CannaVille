@@ -22,6 +22,22 @@ struct RelativeHumidityFraction {
     double value{};
 };
 
+struct RelativeHumidityPercent {
+    double value{};
+};
+
+struct AtmosphericPressureKPa {
+    double value{};
+};
+
+struct VaporPressureKPa {
+    double value{};
+};
+
+struct VPDKPa {
+    double value{};
+};
+
 struct CO2MicromolesPerMole {
     double value{};
 };

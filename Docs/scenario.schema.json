@@ -15,12 +15,50 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "width_m", "depth_m", "cell_size_m"],
-        "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "width_m": {"type": "number", "exclusiveMinimum": 0},
-          "depth_m": {"type": "number", "exclusiveMinimum": 0},
-          "cell_size_m": {"type": "number", "exclusiveMinimum": 0}
+          "required": ["id", "width_m", "depth_m", "cell_size_m"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "width_m": {"type": "number", "exclusiveMinimum": 0},
+            "depth_m": {"type": "number", "exclusiveMinimum": 0},
+          "cell_size_m": {"type": "number", "exclusiveMinimum": 0},
+          "cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "center_x_m", "center_y_m", "environment", "lighting_schedule"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "center_x_m": {"type": "number", "minimum": 0},
+                "center_y_m": {"type": "number", "minimum": 0},
+                "environment": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["air_temperature_c", "relative_humidity_percent", "atmospheric_pressure_kpa", "co2_umol_per_mol"],
+                  "properties": {
+                    "air_temperature_c": {"type": "number"},
+                    "relative_humidity_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                    "atmospheric_pressure_kpa": {"type": "number", "exclusiveMinimum": 0},
+                    "co2_umol_per_mol": {"type": "number", "minimum": 0},
+                    "leaf_temperature_c": {"type": ["number", "null"]}
+                  }
+                },
+                "lighting_schedule": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["start_seconds", "end_seconds", "ppfd_umol_per_m2_s"],
+                    "properties": {
+                      "start_seconds": {"type": "number", "minimum": 0, "maximum": 86400},
+                      "end_seconds": {"type": "number", "minimum": 0, "maximum": 86400},
+                      "ppfd_umol_per_m2_s": {"type": "number", "minimum": 0}
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

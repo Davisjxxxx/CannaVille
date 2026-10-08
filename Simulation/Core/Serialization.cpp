@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 namespace cannaville::core {
@@ -13,6 +14,9 @@ namespace {
 json::Value number(double value) { return json::Value(value); }
 json::Value string_value(const std::string& value) { return json::Value(value); }
 json::Value unsigned_value(std::uint64_t value) { return json::Value(std::to_string(value)); }
+json::Value optional_number(const std::optional<units::Celsius>& value) {
+    return value.has_value() ? number(value->value) : json::Value(nullptr);
+}
 
 double number_field(const json::Value& object, std::string_view key) {
     const json::Value& value = object.require(key);
@@ -75,26 +79,50 @@ plants::GrowthStage stage_from_string(const std::string& stage) {
 json::Value environment_json(const environment::EnvironmentState& value) {
     return json::Value({
         {"air_temperature_c", number(value.air_temperature.value)},
-        {"relative_humidity_fraction", number(value.relative_humidity.value)},
+        {"relative_humidity_percent", number(value.relative_humidity.value)},
+        {"atmospheric_pressure_kpa", number(value.atmospheric_pressure.value)},
         {"co2_umol_per_mol", number(value.carbon_dioxide.value)},
         {"airflow_m_per_s", number(value.airflow.value)},
         {"cell_height_m", number(value.cell_height.value)},
+        {"leaf_temperature_c", optional_number(value.leaf_temperature)},
+        {"saturation_vapor_pressure_kpa", number(value.saturation_vapor_pressure.value)},
+        {"actual_vapor_pressure_kpa", number(value.actual_vapor_pressure.value)},
+        {"air_vpd_kpa", number(value.air_vpd.value)},
+        {"leaf_vpd_kpa", value.leaf_vpd.has_value() ? number(value.leaf_vpd->value) : json::Value(nullptr)},
+        {"physics_available", json::Value(value.physics_available)},
     });
 }
 
 void read_environment(const json::Value& object, environment::EnvironmentState& value) {
     value.air_temperature.value = number_field(object, "air_temperature_c");
-    value.relative_humidity.value = number_field(object, "relative_humidity_fraction");
+    value.relative_humidity.value = number_field(object, "relative_humidity_percent");
+    value.atmospheric_pressure.value = number_field(object, "atmospheric_pressure_kpa");
     value.carbon_dioxide.value = number_field(object, "co2_umol_per_mol");
     value.airflow.value = number_field(object, "airflow_m_per_s");
     value.cell_height.value = number_field(object, "cell_height_m");
+    const json::Value& leaf_temperature = object.require("leaf_temperature_c");
+    if (leaf_temperature.is_null()) {
+        value.leaf_temperature.reset();
+    } else {
+        if (!leaf_temperature.is_number()) throw json::ParseError("leaf_temperature_c must be a number or null");
+        value.leaf_temperature = units::Celsius{leaf_temperature.as_number()};
+    }
+    value.saturation_vapor_pressure.value = number_field(object, "saturation_vapor_pressure_kpa");
+    value.actual_vapor_pressure.value = number_field(object, "actual_vapor_pressure_kpa");
+    value.air_vpd.value = number_field(object, "air_vpd_kpa");
+    const json::Value& leaf_vpd = object.require("leaf_vpd_kpa");
+    if (leaf_vpd.is_null()) value.leaf_vpd.reset();
+    else value.leaf_vpd = units::VPDKPa{number_field(object, "leaf_vpd_kpa")};
+    value.physics_available = bool_field(object, "physics_available");
 }
 
 json::Value lighting_json(const lighting::LightingState& value) {
     return json::Value({
         {"ppfd_umol_per_m2_s", number(value.ppfd.value)},
         {"dli_mol_per_m2_day", number(value.dli.value)},
-        {"photoperiod_hours", number(value.photoperiod.value)},
+        {"photoperiod_duration_s", number(value.photoperiod_duration.value)},
+        {"accumulated_light_on_duration_s", number(value.accumulated_light_on_duration.value)},
+        {"accumulated_dark_duration_s", number(value.accumulated_dark_duration.value)},
         {"light_on", json::Value(value.light_on)},
     });
 }
@@ -102,8 +130,35 @@ json::Value lighting_json(const lighting::LightingState& value) {
 void read_lighting(const json::Value& object, lighting::LightingState& value) {
     value.ppfd.value = number_field(object, "ppfd_umol_per_m2_s");
     value.dli.value = number_field(object, "dli_mol_per_m2_day");
-    value.photoperiod.value = number_field(object, "photoperiod_hours");
+    value.photoperiod_duration.value = number_field(object, "photoperiod_duration_s");
+    value.accumulated_light_on_duration.value = number_field(object, "accumulated_light_on_duration_s");
+    value.accumulated_dark_duration.value = number_field(object, "accumulated_dark_duration_s");
     value.light_on = bool_field(object, "light_on");
+}
+
+json::Value schedule_json(const lighting::LightingSchedule& schedule) {
+    json::Value::Array segments;
+    for (const auto& segment : schedule.segments) {
+        segments.push_back(json::Value({
+            {"start_seconds", number(segment.start_of_day.value)},
+            {"end_seconds", number(segment.end_of_day.value)},
+            {"ppfd_umol_per_m2_s", number(segment.ppfd.value)},
+        }));
+    }
+    return json::Value(std::move(segments));
+}
+
+lighting::LightingSchedule read_schedule(const json::Value& value) {
+    if (!value.is_array()) throw json::ParseError("lighting_schedule must be an array");
+    lighting::LightingSchedule schedule;
+    for (const auto& item : value.as_array()) {
+        lighting::LightingScheduleSegment segment;
+        segment.start_of_day.value = number_field(item, "start_seconds");
+        segment.end_of_day.value = number_field(item, "end_seconds");
+        segment.ppfd.value = number_field(item, "ppfd_umol_per_m2_s");
+        schedule.segments.push_back(segment);
+    }
+    return schedule;
 }
 
 json::Value root_zone_json(const rootzone::RootZoneState& value) {
@@ -256,6 +311,7 @@ json::Value cell_json(const RoomCellState& cell) {
         {"center_x_m", number(cell.center_x.value)},
         {"center_y_m", number(cell.center_y.value)},
         {"environment", environment_json(cell.environment)},
+        {"lighting_schedule", schedule_json(cell.lighting_schedule)},
         {"lighting", lighting_json(cell.lighting)},
     });
 }
@@ -265,6 +321,7 @@ void read_cell(const json::Value& object, RoomCellState& cell) {
     cell.center_x.value = number_field(object, "center_x_m");
     cell.center_y.value = number_field(object, "center_y_m");
     read_environment(object.require("environment"), cell.environment);
+    cell.lighting_schedule = read_schedule(object.require("lighting_schedule"));
     read_lighting(object.require("lighting"), cell.lighting);
 }
 
@@ -276,6 +333,7 @@ json::Value room_json(const RoomState& room) {
         {"width_m", number(room.width.value)},
         {"depth_m", number(room.depth.value)},
         {"cell_size_m", number(room.cell_size.value)},
+        {"uses_explicit_cells", json::Value(room.uses_explicit_cells)},
         {"cells", json::Value(std::move(cells))},
     });
 }
@@ -285,6 +343,7 @@ void read_room(const json::Value& object, RoomState& room) {
     room.width.value = number_field(object, "width_m");
     room.depth.value = number_field(object, "depth_m");
     room.cell_size.value = number_field(object, "cell_size_m");
+    room.uses_explicit_cells = bool_field(object, "uses_explicit_cells");
     const auto& cells = object.require("cells");
     if (!cells.is_array()) throw json::ParseError("state cells must be an array");
     for (const auto& value : cells.as_array()) {

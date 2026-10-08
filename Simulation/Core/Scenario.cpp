@@ -1,6 +1,8 @@
 #include "Simulation/Core/Scenario.hpp"
 
 #include "Simulation/Core/Json.hpp"
+#include "Simulation/Environment/VaporPressure.hpp"
+#include "Simulation/Lighting/LightingSystem.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +43,41 @@ std::int64_t require_integer(const json::Value& object, std::string_view key) {
     return static_cast<std::int64_t>(value);
 }
 
+environment::EnvironmentState parse_environment(const json::Value& object) {
+    require_object(object, "environment");
+    environment::EnvironmentState state;
+    state.air_temperature.value = require_number(object, "air_temperature_c");
+    state.relative_humidity.value = require_number(object, "relative_humidity_percent");
+    state.atmospheric_pressure.value = require_number(object, "atmospheric_pressure_kpa");
+    state.carbon_dioxide.value = require_number(object, "co2_umol_per_mol");
+    const json::Value* leaf_temperature = object.find("leaf_temperature_c");
+    if (leaf_temperature != nullptr && !leaf_temperature->is_null()) {
+        if (!leaf_temperature->is_number() || !std::isfinite(leaf_temperature->as_number())) {
+            throw json::ParseError("leaf_temperature_c must be a finite number or null");
+        }
+        state.leaf_temperature = units::Celsius{leaf_temperature->as_number()};
+    }
+    environment::derive_physical_state(state);
+    return state;
+}
+
+lighting::LightingSchedule parse_lighting_schedule(const json::Value& object) {
+    const json::Value& value = object.require("lighting_schedule");
+    if (!value.is_array()) throw json::ParseError("lighting_schedule must be an array");
+    lighting::LightingSchedule schedule;
+    for (const json::Value& segment_value : value.as_array()) {
+        require_object(segment_value, "lighting schedule segment");
+        lighting::LightingScheduleSegment segment;
+        segment.start_of_day.value = require_number(segment_value, "start_seconds");
+        segment.end_of_day.value = require_number(segment_value, "end_seconds");
+        segment.ppfd.value = require_number(segment_value, "ppfd_umol_per_m2_s");
+        schedule.segments.push_back(segment);
+    }
+    const std::vector<std::string> errors = lighting::validate_schedule(schedule);
+    if (!errors.empty()) throw json::ParseError(errors.front());
+    return schedule;
+}
+
 } // namespace
 
 Scenario Scenario::load_json(std::string_view json_text) {
@@ -65,6 +102,20 @@ Scenario Scenario::load_json(std::string_view json_text) {
         definition.width.value = require_number(room, "width_m");
         definition.depth.value = require_number(room, "depth_m");
         definition.cell_size.value = require_number(room, "cell_size_m");
+        const json::Value* cells = room.find("cells");
+        if (cells != nullptr) {
+            if (!cells->is_array()) throw json::ParseError("room cells must be an array");
+            for (const json::Value& cell_value : cells->as_array()) {
+                require_object(cell_value, "cell");
+                ScenarioCellDefinition cell;
+                cell.id = require_string(cell_value, "id");
+                cell.center_x.value = require_number(cell_value, "center_x_m");
+                cell.center_y.value = require_number(cell_value, "center_y_m");
+                cell.environment = parse_environment(cell_value.require("environment"));
+                cell.lighting_schedule = parse_lighting_schedule(cell_value);
+                definition.cells.push_back(std::move(cell));
+            }
+        }
         scenario.rooms.push_back(std::move(definition));
     }
 
@@ -110,6 +161,7 @@ std::vector<std::string> Scenario::validate() const {
     if (fixed_timestep.value > 86400.0) {
         errors.push_back("fixed_timestep_seconds must not exceed one day in the bootstrap");
     }
+    if (rooms.empty()) errors.push_back("at least one room is required");
 
     std::set<std::string> room_ids;
     for (const ScenarioRoomDefinition& room : rooms) {
@@ -131,6 +183,24 @@ std::vector<std::string> Scenario::validate() const {
             const double cell_count = std::ceil(room.width.value / room.cell_size.value) *
                 std::ceil(room.depth.value / room.cell_size.value);
             if (cell_count > 10000.0) errors.push_back("room " + room.id + " exceeds bootstrap cell limit");
+        }
+        std::set<std::string> cell_ids;
+        for (const ScenarioCellDefinition& cell : room.cells) {
+            if (cell.id.empty()) errors.push_back("room " + room.id + " cell id must not be empty");
+            if (!cell_ids.insert(cell.id).second) errors.push_back("duplicate cell id: " + cell.id);
+            if (!std::isfinite(cell.center_x.value) || cell.center_x.value < 0.0 ||
+                cell.center_x.value > room.width.value) {
+                errors.push_back("cell " + cell.id + " center_x_m is outside its room");
+            }
+            if (!std::isfinite(cell.center_y.value) || cell.center_y.value < 0.0 ||
+                cell.center_y.value > room.depth.value) {
+                errors.push_back("cell " + cell.id + " center_y_m is outside its room");
+            }
+            if (!cell.environment.physics_available) {
+                errors.push_back("cell " + cell.id + " has no validated physical environment state");
+            }
+            const auto schedule_errors = lighting::validate_schedule(cell.lighting_schedule);
+            errors.insert(errors.end(), schedule_errors.begin(), schedule_errors.end());
         }
     }
 

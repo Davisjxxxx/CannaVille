@@ -7,12 +7,15 @@ The simulation uses SI-oriented units internally. Every biological or environmen
 | Time | seconds | `_seconds`, `units::Seconds` |
 | Distance | metres | `_m`, `units::Meters` |
 | Temperature | degrees Celsius | `_c`, `units::Celsius` |
-| Relative humidity | fraction from 0 to 1 | `_fraction`, `units::RelativeHumidityFraction` |
+| Relative humidity | percent from 0 to 100 | `_percent`, `units::RelativeHumidityPercent` |
+| Atmospheric pressure | kilopascals | `_kpa`, `units::AtmosphericPressureKPa` |
+| Vapor pressure | kilopascals | `_kpa`, `units::VaporPressureKPa` |
+| Vapor pressure deficit | kilopascals | `_kpa`, `units::VPDKPa` |
 | CO2 | micromoles per mole | `_umol_per_mol`, `units::CO2MicromolesPerMole` |
 | Airflow | metres per second | `_m_per_s`, `units::AirflowMetersPerSecond` |
 | PPFD | micromoles per square metre per second | `_umol_per_m2_s` |
 | DLI | moles per square metre per day | `_mol_per_m2_day` |
-| Photoperiod | hours | `_hours` |
+| Photoperiod and exposure duration | seconds internally | `_duration_s`, `units::Seconds` |
 | pH | dimensionless pH scale | `ph`, `units::PH` |
 | EC | millisiemens per centimetre | `_ms_per_cm` |
 | Substrate moisture | fraction | `_fraction` |
@@ -27,3 +30,5 @@ The simulation uses SI-oriented units internally. Every biological or environmen
 5. A value with unknown units is invalid input, not an implicit assumption.
 
 The bootstrap uses zero-valued placeholder state where no model has been approved. Zero is an inert initialization value, not a horticultural claim.
+
+P1A stores measured relative humidity as percent, not as a fraction. The existing fraction wrapper remains available for unrelated placeholder moisture fields; it must not be used for P1A air RH.
