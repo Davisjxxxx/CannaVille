@@ -581,6 +581,202 @@ void test_transpiration_robustness_sweep() {
 
 } // namespace
 
+#include "Simulation/RootZone/RootZoneWater.hpp"
+
+void test_rootzone_exact_event_timing() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    // Simulate 15 minute timestep (900 seconds)
+    // - 08:00 (0s) - start
+    // - 08:07 (420s) - irrigate 0.005
+    // - 08:12 (720s) - irrigate 0.005 + top-off 0.001
+    // - 08:14 (840s) - exact boundary drainage event
+    // - 08:15 (900s) - end exactly on boundary
+    SubstrateContainer container{VolumeCubicMeters{0.05}, VolumeCubicMeters{0.01}, VolumeCubicMeters{0.05}};
+    
+    WaterFluxMolesPerSquareMeterSecond flux{0.01};
+    AreaSquareMeters area{1.0};
+    
+    // Step 1: 0 to 420 (08:07)
+    container.withdraw_transpiration(flux, area, Seconds{420});
+    container.irrigate(VolumeCubicMeters{0.005});
+    
+    // Step 2: 420 to 720 (08:12)
+    container.withdraw_transpiration(flux, area, Seconds{300});
+    container.irrigate(VolumeCubicMeters{0.005});
+    container.add_top_off(VolumeCubicMeters{0.001}); // multiple event types
+    
+    // Step 3: 720 to 840 (08:14)
+    container.withdraw_transpiration(flux, area, Seconds{120});
+    container.process_drainage(VolumeCubicMeters{0.002}); // drainage inside timestep
+    
+    // Step 4: 840 to 900 (08:15)
+    container.withdraw_transpiration(flux, area, Seconds{60});
+    
+    // Verify cumulative
+    double total_requested = (420 + 300 + 120 + 60) * flux.value * area.value * moles_water_to_cubic_meters(1.0);
+    double expected_final = 0.01 + 0.005 + 0.005 + 0.001 - 0.002 - total_requested;
+    
+    require_near(container.get_last_balance().plant_withdrawal_requested_m3, total_requested, 1e-10, "Withdrawal total correct");
+    require_near(container.current_water().value, expected_final, 1e-10, "Final water correct");
+    require(std::abs(container.get_last_balance().residual_m3) < 1e-10, "Conservation residual explicitly bounded < 1e-10");
+    
+    // Deterministic repeat
+    SubstrateContainer container2{VolumeCubicMeters{0.05}, VolumeCubicMeters{0.01}, VolumeCubicMeters{0.05}};
+    container2.withdraw_transpiration(flux, area, Seconds{420});
+    container2.irrigate(VolumeCubicMeters{0.005});
+    container2.withdraw_transpiration(flux, area, Seconds{300});
+    container2.irrigate(VolumeCubicMeters{0.005});
+    container2.add_top_off(VolumeCubicMeters{0.001});
+    container2.withdraw_transpiration(flux, area, Seconds{120});
+    container2.process_drainage(VolumeCubicMeters{0.002});
+    container2.withdraw_transpiration(flux, area, Seconds{60});
+    
+    require_near(container.current_water().value, container2.current_water().value, 1e-12, "Repeat run must be deterministic");
+}
+void test_rootzone_dry_down() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    // bulk_volume, initial_water, max_stored_water
+    SubstrateContainer container{VolumeCubicMeters{0.01}, VolumeCubicMeters{0.005}, VolumeCubicMeters{0.01}};
+    require_near(container.volumetric_water_content(), 0.5, 1e-6, "Initial VWC should be 0.5");
+    require_near(container.storage_fraction().value(), 0.5, 1e-6, "Initial storage fraction should be 0.5");
+    
+    // Withdrawing water
+    WaterFluxMolesPerSquareMeterSecond flux{0.005};
+    AreaSquareMeters area{1.0};
+    Seconds dt{3600};
+    
+    auto withdrawn = container.withdraw_transpiration(flux, area, dt);
+    require(withdrawn.value > 0.0, "Should have withdrawn water");
+    require(std::abs(container.get_last_balance().residual_m3) < 1e-12, "Residual should be near zero");
+    
+    // Dry down to insufficient
+    flux.value = 1.0;
+    withdrawn = container.withdraw_transpiration(flux, area, dt);
+    require(container.get_last_balance().status == WaterStatus::InsufficientRootzoneWater, "Should be insufficient");
+    require_near(container.current_water().value, 0.0, 1e-6, "Should be empty");
+    require(container.get_last_balance().plant_withdrawal_unmet_m3 > 0.0, "Should have unmet demand");
+}
+
+void test_rootzone_pulsed_irrigation() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    SubstrateContainer container{VolumeCubicMeters{0.02}, VolumeCubicMeters{0.005}, VolumeCubicMeters{0.01}};
+    
+    container.irrigate(VolumeCubicMeters{0.002});
+    require_near(container.current_water().value, 0.007, 1e-6, "Should have 0.007 m3");
+    
+    // Oversaturate
+    container.irrigate(VolumeCubicMeters{0.005});
+    container.process_drainage();
+    require_near(container.current_water().value, 0.01, 1e-6, "Should be capped at max capacity");
+    require(container.get_last_balance().status == WaterStatus::Overflow, "Should have overflow status");
+    require(container.get_last_balance().drainage_removed_m3 > 0.0, "Should have drainage");
+    require(std::abs(container.get_last_balance().residual_m3) < 1e-12, "Residual should be near zero");
+    require_near(container.volumetric_water_content(), 0.5, 1e-6, "VWC is 0.01/0.02 = 0.5");
+}
+
+void test_rootzone_dwc_reservoir() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    HydroponicReservoir res{VolumeCubicMeters{0.1}, VolumeCubicMeters{0.08}};
+    res.add_external_return_flow(VolumeCubicMeters{0.03});
+    res.process_discharge();
+    require_near(res.current_water().value, 0.1, 1e-6, "Should be full");
+    require(std::abs(res.get_last_balance().residual_m3) < 1e-12, "Residual should be near zero");
+    
+    auto withdrawn = res.withdraw_transpiration(WaterFluxMolesPerSquareMeterSecond{0.01}, AreaSquareMeters{2.0}, Seconds{3600});
+    require(withdrawn.value > 0.0, "Should withdraw water");
+    require(res.current_water().value < 0.1, "Should have less water");
+    require(std::abs(res.get_last_balance().residual_m3) < 1e-12, "Residual should be near zero");
+}
+
+void test_rootzone_shared_allocation() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    SubstrateContainer container{VolumeCubicMeters{0.02}, VolumeCubicMeters{0.01}};
+    
+    std::vector<TranspirationRequest> requests = {
+        {WaterFluxMolesPerSquareMeterSecond{10.0}, AreaSquareMeters{1.0}},
+        {WaterFluxMolesPerSquareMeterSecond{30.0}, AreaSquareMeters{1.0}}
+    };
+    
+    auto realized = container.withdraw_transpiration_shared(requests, Seconds{3600});
+    require(container.get_last_balance().status == WaterStatus::InsufficientRootzoneWater, "Should be insufficient");
+    require_near(container.current_water().value, 0.0, 1e-6, "Should be empty");
+    
+    // Proportional allocation: 1:3 ratio
+    require_near(realized[0].value, 0.0025, 1e-6, "25% of water");
+    require_near(realized[1].value, 0.0075, 1e-6, "75% of water");
+    require(std::abs(container.get_last_balance().residual_m3) < 1e-12, "Residual should be near zero");
+}
+
+void test_rootzone_exact_event_timing();
+void test_rootzone_unit_conversion() {
+    using namespace cannaville::rootzone;
+    double moles = 1000.0;
+    double m3 = moles_water_to_cubic_meters(moles);
+    // 1000 moles * 18.01528 g/mol / 998.2 kg/m^3 = 0.01804776 m3
+    require_near(m3, 0.01804776, 1e-6, "Molar conversion check");
+}
+
+void test_rootzone_robustness_sweep() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::units;
+    
+    std::vector<double> init_water = {0.0, 0.005, 0.01, 0.02};
+    std::vector<double> irrigations = {0.0, 0.001, 0.02};
+    std::vector<double> fluxes = {0.0, 0.005, 0.1};
+    
+    int numerically_invalid = 0;
+    
+    for (double iw : init_water) {
+        for (double irr : irrigations) {
+            for (double flux : fluxes) {
+                SubstrateContainer c{VolumeCubicMeters{0.02}, VolumeCubicMeters{iw}, VolumeCubicMeters{0.01}};
+                c.reset_balance();
+                c.irrigate(VolumeCubicMeters{irr});
+                c.process_drainage();
+                c.withdraw_transpiration(WaterFluxMolesPerSquareMeterSecond{flux}, AreaSquareMeters{1.0}, Seconds{3600});
+                
+                if (std::abs(c.get_last_balance().residual_m3) > 1e-10) {
+                    numerically_invalid++;
+                }
+                if (std::isnan(c.current_water().value) || c.current_water().value < 0.0) {
+                    numerically_invalid++;
+                }
+            }
+        }
+    }
+    require(numerically_invalid == 0, "Encountered numerically invalid states during sweep");
+}
+
+void test_rootzone_ledger_serialization() {
+    using namespace cannaville::rootzone;
+    using namespace cannaville::core;
+    
+    // Use standard smoke scenario to build a valid simulation
+    const auto scenario = Scenario::load_json(smoke_json);
+    Simulation original(scenario, 99);
+    original.advance_fixed_step();
+    
+    const std::string serialized = original.serialize_state();
+    
+    require(serialized.find("\"substrate_bulk_volume_m3\"") != std::string::npos, "substrate volume exists");
+    require(serialized.find("\"current_water_volume_m3\"") != std::string::npos, "current water volume exists");
+    require(serialized.find("\"cumulative_irrigation_top_off_m3\"") != std::string::npos, "irrigation cumulative exists");
+    require(serialized.find("\"cumulative_evaporation_m3\"") != std::string::npos, "evaporation cumulative exists");
+    
+    Simulation restored;
+    restored.load_serialized_state(serialized);
+    require(restored.serialize_state() == serialized, "roundtrip exact");
+}
 int main() {
     try {
         test_deterministic_repeated_runs();
@@ -598,6 +794,14 @@ int main() {
         test_gas_exchange_robustness_and_domain_guards();
         test_transpiration();
         test_transpiration_robustness_sweep();
+        test_rootzone_dry_down();
+        test_rootzone_pulsed_irrigation();
+        test_rootzone_dwc_reservoir();
+        test_rootzone_shared_allocation();
+        test_rootzone_exact_event_timing();
+        test_rootzone_unit_conversion();
+        test_rootzone_robustness_sweep();
+        test_rootzone_ledger_serialization();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
@@ -612,7 +816,15 @@ int main() {
                   << "PASS: gas exchange models\n"
                   << "PASS: gas exchange robustness and domain guards\n"
                   << "PASS: transpiration\n"
-                  << "PASS: transpiration robustness sweep\n";
+                  << "PASS: transpiration robustness sweep\n"
+                  << "PASS: rootzone dry down\n"
+                  << "PASS: rootzone pulsed irrigation\n"
+                  << "PASS: rootzone DWC reservoir\n"
+                  << "PASS: rootzone shared allocation\n"
+                  << "PASS: rootzone exact event timing\n"
+                  << "PASS: rootzone unit conversion\n"
+                  << "PASS: rootzone robustness sweep\n"
+                  << "PASS: rootzone ledger serialization\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

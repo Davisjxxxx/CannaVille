@@ -1,0 +1,259 @@
+{
+  "registry_version": 1,
+  "entries": [
+    {
+      "model_id": "physics.air_properties",
+      "version": "1.0.0",
+      "purpose": "Calculate kinematic viscosity and vapor diffusivity of air based on temperature and pressure.",
+      "equation_or_algorithm": "D_v = 2.12e-5 * (101.325/P) * (T_K/273.15)^1.75; nu = 1.33e-5 * (101.325/P) * (T_K/273.15)^1.75",
+      "inputs": [
+        {
+          "name": "air_temperature",
+          "unit": "degC"
+        },
+        {
+          "name": "pressure",
+          "unit": "kPa"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "vapor_diffusivity",
+          "unit": "m^2 s^-1"
+        },
+        {
+          "name": "kinematic_viscosity",
+          "unit": "m^2 s^-1"
+        },
+        {
+          "name": "molar_density",
+          "unit": "mol m^-3"
+        }
+      ],
+      "units": [
+        "degC",
+        "kPa",
+        "m^2 s^-1",
+        "mol m^-3"
+      ],
+      "source_title": "An Introduction to Environmental Biophysics (2nd Ed)",
+      "authors": [
+        "Campbell, G.S.",
+        "Norman, J.M."
+      ],
+      "publication_or_organization": "Springer (1998)",
+      "doi_or_stable_identifier": "ISBN 978-0-387-94937-6",
+      "valid_domain": "Standard terrestrial atmosphere temperatures and pressures.",
+      "assumptions": [
+        "Ideal gas behavior for molar density."
+      ],
+      "approximation_status": "mechanistic physics model",
+      "calibration_status": "not_applicable",
+      "implementation_location": "Simulation/Transpiration/Transpiration.cpp",
+      "validation_tests": [
+        "test_transpiration"
+      ],
+      "notes": []
+    },
+    {
+      "model_id": "plants.boundary_layer.mixed_convection",
+      "version": "1.0.0",
+      "purpose": "Calculate leaf boundary-layer conductance to water vapor using DOMINANT_MODE_APPROXIMATION.",
+      "equation_or_algorithm": "Sh = max(Sh_forced, Sh_free); g_bw = (D_v / d) * Sh * rho_m",
+      "inputs": [
+        {
+          "name": "air_velocity",
+          "unit": "m s^-1"
+        },
+        {
+          "name": "characteristic_dimension",
+          "unit": "m"
+        },
+        {
+          "name": "leaf_temperature",
+          "unit": "degC"
+        },
+        {
+          "name": "air_temperature",
+          "unit": "degC"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conductance",
+          "unit": "mol m^-2 s^-1"
+        },
+        {
+          "name": "regime",
+          "unit": "enum"
+        }
+      ],
+      "units": [
+        "m s^-1",
+        "m",
+        "degC",
+        "mol m^-2 s^-1"
+      ],
+      "source_title": "An Introduction to Environmental Biophysics (2nd Ed)",
+      "authors": [
+        "Campbell, G.S.",
+        "Norman, J.M."
+      ],
+      "publication_or_organization": "Springer (1998)",
+      "doi_or_stable_identifier": "ISBN 978-0-387-94937-6",
+      "valid_domain": "Characteristic dimension > 0; laminar flow (Re < 20,000).",
+      "assumptions": [
+        "Flat plate geometry.",
+        "Maximum of forced and free convection used for mixed regime approximation (DOMINANT_MODE_APPROXIMATION).",
+        "Free convection formula assumes heated horizontal upward-facing plate."
+      ],
+      "approximation_status": "mechanistic physics model with domain truncation",
+      "calibration_status": "not_applicable",
+      "implementation_location": "Simulation/Transpiration/Transpiration.cpp",
+      "validation_tests": [
+        "test_transpiration"
+      ],
+      "notes": [
+        "Explicitly fails for turbulent regimes (Re > 20,000) returning UnsupportedFlowRegime. Re transition is an implementation domain, not a universal biological truth."
+      ]
+    },
+    {
+      "model_id": "plants.transpiration.flux",
+      "version": "1.0.0",
+      "purpose": "Calculate total series vapor conductance and resultant transpiration flux.",
+      "equation_or_algorithm": "g_total = (g_s * g_b) / (g_s + g_b); E = g_total * (VPD / P_atm)",
+      "inputs": [
+        {
+          "name": "stomatal_conductance",
+          "unit": "mol m^-2 s^-1"
+        },
+        {
+          "name": "boundary_layer_conductance",
+          "unit": "mol m^-2 s^-1"
+        },
+        {
+          "name": "leaf_to_air_vpd",
+          "unit": "kPa"
+        },
+        {
+          "name": "pressure",
+          "unit": "kPa"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transpiration_flux",
+          "unit": "mol m^-2 s^-1"
+        },
+        {
+          "name": "status",
+          "unit": "enum"
+        }
+      ],
+      "units": [
+        "mol m^-2 s^-1",
+        "kPa"
+      ],
+      "source_title": "CannaVille Engine Internal",
+      "authors": [
+        "CannaVille Development Team"
+      ],
+      "publication_or_organization": "CannaVille",
+      "doi_or_stable_identifier": "internal",
+      "valid_domain": "Pressure > 0; boundary layer conductance must be Valid; returns 'condensation' status if VPD < 0.",
+      "assumptions": [
+        "One-sided leaf resistance analog (per-unit-transpiring area).",
+        "Mole fraction difference approximated via VPD/P_atm.",
+        "whole_plant_water_loss = E * effective_transpiring_leaf_area"
+      ],
+      "approximation_status": "mechanistic series resistance model",
+      "calibration_status": "not_applicable",
+      "implementation_location": "Simulation/Transpiration/Transpiration.cpp",
+      "validation_tests": [
+        "test_transpiration"
+      ],
+      "notes": [
+        "Requires effective transpiring leaf area to be explicitly supplied for whole-plant aggregation."
+      ]
+    },
+    {
+      "model_id": "rootzone.mass_balance",
+      "version": "1.1.0",
+      "purpose": "Strict conservation of external water volume crossing the control-volume boundary.",
+      "equation_or_algorithm": "final_storage = initial_storage + irrigation + top_off + external_return_flow - realized_withdrawal - drainage - discharge - evaporation = residual",
+      "inputs": [
+        {
+          "name": "irrigation",
+          "unit": "m^3"
+        },
+        {
+          "name": "external_return_flow",
+          "unit": "m^3"
+        },
+        {
+          "name": "evaporation",
+          "unit": "m^3"
+        },
+        {
+          "name": "transpiration_requested",
+          "unit": "m^3"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "current_water_volume",
+          "unit": "m^3"
+        },
+        {
+          "name": "realized_withdrawal",
+          "unit": "m^3"
+        },
+        {
+          "name": "unmet_demand",
+          "unit": "m^3"
+        },
+        {
+          "name": "drainage",
+          "unit": "m^3"
+        },
+        {
+          "name": "residual",
+          "unit": "m^3"
+        }
+      ],
+      "units": [
+        "m^3"
+      ],
+      "source_title": "CannaVille Engine Internal",
+      "authors": [
+        "CannaVille Development Team"
+      ],
+      "publication_or_organization": "CannaVille",
+      "doi_or_stable_identifier": "internal",
+      "valid_domain": "Water volume >= 0. Substrate bulk volume > 0. Residual strictly near zero.",
+      "assumptions": [
+        "QUASI_STEADY_ROOT_UPTAKE_APPROXIMATION: Root uptake matches transpiration dynamically using SYNTHETIC_TEST_INPUT leaf area.",
+        "STORAGE_CAPACITY_OVERFLOW_APPROXIMATION: Excess water instantly drains.",
+        "Internal recirculation in DWC does not alter mass balance; only external_return_flow does.",
+        "Evaporation is strictly external/zero for now.",
+        "Mass balance tolerance < 1e-10 m3."
+      ],
+      "approximation_status": "mass conservation explicit",
+      "calibration_status": "not_applicable",
+      "implementation_location": "Simulation/RootZone/RootZoneWater.cpp",
+      "validation_tests": [
+        "test_rootzone_dry_down",
+        "test_rootzone_pulsed_irrigation",
+        "test_rootzone_dwc_reservoir",
+        "test_rootzone_robustness_sweep",
+        "test_rootzone_shared_allocation",
+        "test_rootzone_exact_event_timing"
+      ],
+      "notes": [
+        "VWC is exactly water_volume / substrate_bulk_volume.",
+        "storage_fraction is exactly water_volume / max_stored_water.",
+        "Conversion: 1 mol H2O = 1.8047766e-5 m3 (998.2 kg/m3 density)."
+      ]
+    }
+  ]
+}

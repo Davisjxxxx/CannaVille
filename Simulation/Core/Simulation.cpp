@@ -286,4 +286,32 @@ std::string Simulation::csv_row() const {
     return output;
 }
 
-} // namespace cannaville::core
+std::string Simulation::root_zone_csv_header() const {
+    return "timestamp_s,root_zone_id,type,initial_storage_m3,current_water_volume_m3,final_storage_m3,"
+           "substrate_bulk_volume_m3,vwc,storage_fraction,irrigation_topoff_m3,external_return_m3,"
+           "realized_withdrawal_m3,drainage_discharge_m3,evaporation_m3,unmet_demand_m3,residual_m3\n";
+}
+
+std::string Simulation::root_zone_csv_row() const {
+    std::string output;
+    for (const plants::PlantState& plant : state_.plants) {
+        const auto& rz = plant.root_zone;
+        std::string type_str = (rz.type == rootzone::RootZoneType::Substrate) ? "Substrate" : "Reservoir";
+        std::string vwc_str = rz.volumetric_water_content.has_value() ? std::to_string(*rz.volumetric_water_content) : "";
+        std::string frac_str = rz.storage_fraction.has_value() ? std::to_string(*rz.storage_fraction) : "";
+        output += std::to_string(state_.clock.elapsed.value) + "," + rz.id + "," + type_str + ",,";
+        output += std::to_string(rz.current_water_volume.value) + ",,";
+        output += std::to_string(rz.substrate_bulk_volume.value) + ",";
+        output += vwc_str + "," + frac_str + ",";
+        output += std::to_string(rz.cumulative_irrigation_top_off.value) + ",";
+        output += std::to_string(rz.cumulative_external_return_flow.value) + ",";
+        output += std::to_string(rz.cumulative_realized_withdrawal.value) + ",";
+        output += std::to_string(rz.cumulative_drainage_discharge.value) + ",";
+        output += std::to_string(rz.cumulative_evaporation.value) + ",";
+        output += std::to_string(rz.cumulative_unmet_demand.value) + ",";
+        output += "0.0\n";
+    }
+    return output;
+}
+}
+// namespace cannaville::core
