@@ -162,21 +162,84 @@ lighting::LightingSchedule read_schedule(const json::Value& value) {
 }
 
 json::Value root_zone_json(const rootzone::RootZoneState& value) {
-    return json::Value({
-        {"substrate_moisture_fraction", number(value.substrate_moisture.value)},
-        {"root_zone_temperature_c", number(value.root_zone_temperature.value)},
-        {"ph", number(value.ph.value)},
-        {"ec_ms_per_cm", number(value.electrical_conductivity.value)},
-    });
+    std::map<std::string, json::Value> obj;
+    
+    // Schema version
+    obj["schema_version"] = json::Value(2.0);
+    obj["id"] = string_value(value.id);
+    obj["type"] = string_value(value.type == rootzone::RootZoneType::Substrate ? "Substrate" : "Reservoir");
+    
+    // Core parameters
+    obj["substrate_bulk_volume_m3"] = number(value.substrate_bulk_volume.value);
+    if (value.max_stored_water.has_value()) {
+        obj["max_stored_water_m3"] = number(value.max_stored_water->value);
+    }
+    
+    // State
+    obj["current_water_volume_m3"] = number(value.current_water_volume.value);
+    
+    if (value.volumetric_water_content.has_value()) {
+        obj["volumetric_water_content_m3_m3"] = number(value.volumetric_water_content.value());
+    }
+    if (value.storage_fraction.has_value()) {
+        obj["storage_fraction"] = number(value.storage_fraction.value());
+    }
+    
+    // Ledgers
+    obj["cumulative_irrigation_top_off_m3"] = number(value.cumulative_irrigation_top_off.value);
+    obj["cumulative_external_return_flow_m3"] = number(value.cumulative_external_return_flow.value);
+    obj["cumulative_realized_withdrawal_m3"] = number(value.cumulative_realized_withdrawal.value);
+    obj["cumulative_drainage_discharge_m3"] = number(value.cumulative_drainage_discharge.value);
+    obj["cumulative_evaporation_m3"] = number(value.cumulative_evaporation.value);
+    obj["cumulative_unmet_demand_m3"] = number(value.cumulative_unmet_demand.value);
+    
+    // Legacy placeholders
+    obj["root_zone_temperature_c"] = number(value.root_zone_temperature.value);
+    obj["ph"] = number(value.ph.value);
+    obj["ec_ms_per_cm"] = number(value.electrical_conductivity.value);
+    
+    return json::Value(obj);
 }
 
 void read_root_zone(const json::Value& object, rootzone::RootZoneState& value) {
-    value.substrate_moisture.value = number_field(object, "substrate_moisture_fraction");
-    value.root_zone_temperature.value = number_field(object, "root_zone_temperature_c");
-    value.ph.value = number_field(object, "ph");
-    value.electrical_conductivity.value = number_field(object, "ec_ms_per_cm");
+    if (auto* v = object.find("id")) value.id = v->as_string();
+    if (auto* v = object.find("type")) {
+        value.type = (v->as_string() == "Reservoir") ? rootzone::RootZoneType::Reservoir : rootzone::RootZoneType::Substrate;
+    }
+    
+    if (auto* v = object.find("substrate_bulk_volume_m3")) value.substrate_bulk_volume.value = v->as_number();
+    
+    if (auto* v = object.find("max_stored_water_m3")) {
+        value.max_stored_water = units::VolumeCubicMeters{v->as_number()};
+    } else {
+        value.max_stored_water = std::nullopt;
+    }
+    
+    if (auto* v = object.find("current_water_volume_m3")) value.current_water_volume.value = v->as_number();
+    
+    if (auto* v = object.find("volumetric_water_content_m3_m3")) {
+        value.volumetric_water_content = v->as_number();
+    } else {
+        value.volumetric_water_content = std::nullopt;
+    }
+    
+    if (auto* v = object.find("storage_fraction")) {
+        value.storage_fraction = v->as_number();
+    } else {
+        value.storage_fraction = std::nullopt;
+    }
+    
+    value.cumulative_irrigation_top_off.value = object.find("cumulative_irrigation_top_off_m3") ? object.find("cumulative_irrigation_top_off_m3")->as_number() : 0.0;
+    value.cumulative_external_return_flow.value = object.find("cumulative_external_return_flow_m3") ? object.find("cumulative_external_return_flow_m3")->as_number() : 0.0;
+    value.cumulative_realized_withdrawal.value = object.find("cumulative_realized_withdrawal_m3") ? object.find("cumulative_realized_withdrawal_m3")->as_number() : 0.0;
+    value.cumulative_drainage_discharge.value = object.find("cumulative_drainage_discharge_m3") ? object.find("cumulative_drainage_discharge_m3")->as_number() : 0.0;
+    value.cumulative_evaporation.value = object.find("cumulative_evaporation_m3") ? object.find("cumulative_evaporation_m3")->as_number() : 0.0;
+    value.cumulative_unmet_demand.value = object.find("cumulative_unmet_demand_m3") ? object.find("cumulative_unmet_demand_m3")->as_number() : 0.0;
+    
+    value.root_zone_temperature.value = object.find("root_zone_temperature_c") ? object.find("root_zone_temperature_c")->as_number() : 20.0;
+    value.ph.value = object.find("ph") ? object.find("ph")->as_number() : 6.0;
+    value.electrical_conductivity.value = object.find("ec_ms_per_cm") ? object.find("ec_ms_per_cm")->as_number() : 1.5;
 }
-
 json::Value plant_json(const plants::PlantState& plant) {
     return json::Value({
         {"id", string_value(plant.id)},

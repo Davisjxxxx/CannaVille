@@ -52,6 +52,8 @@ public:
     std::uint64_t seed() const;
     std::string csv_header() const;
     std::string csv_row() const;
+    std::string root_zone_csv_header() const;
+    std::string root_zone_csv_row() const;
 
 private:
     Scenario scenario_;

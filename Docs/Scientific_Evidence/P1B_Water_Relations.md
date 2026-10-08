@@ -150,3 +150,15 @@ The current boundary-layer and transpiration models calculate leaf-area-normaliz
 - **STORAGE_CAPACITY_OVERFLOW_APPROXIMATION**: Both substrate and reservoir models currently approximate excess water (beyond `max_capacity_m3`) as immediate drainage/overflow, rather than modeling complex matric potential pooling or transient flooding states.
 - **Volumetric Water Content (VWC)**: For `SubstrateContainer`, VWC is calculated physically as `current_water_m3 / volume_m3` and treated as a purely physical property, not yet biologically coupled to hydraulic stress or root conductivity.
 - **Insufficient Water State**: If the volume requested by transpiration exceeds available water, an explicit `INSUFFICIENT_ROOTZONE_WATER` state is reported, and only the remaining volume is withdrawn. Negative storage or silent stomatal clamping is strictly prohibited in this baseline conservation layer.
+
+## B21. P1B.3A State Semantics Closure
+
+- **Volumetric Water Content (VWC)**: Strictly defined as `liquid_water_volume_m3 / substrate_bulk_volume_m3`. The denominator is the total physical volume of the substrate.
+- **Storage Fraction**: A completely distinct quantity defined as `current_water_volume_m3 / max_stored_water_volume_m3`. It is not VWC and should not be treated as such.
+- **DWC Control Volume**: A `HydroponicReservoir` represents the full recirculating system (reservoir + modules). Internal pump circulation is NOT an external mass balance term. `external_return_flow` is only used for water crossing the system boundary.
+- **Conservation Ledger**: The complete equation is `final_storage = initial_storage + irrigation + top_off + external_return_flow - realized_withdrawal - drainage - discharge - evaporation`.
+- **Insufficient Demand**: If requested withdrawal exceeds available water, the physical balance uses `realized_withdrawal` (which caps at available water). `unmet_demand` is tracked diagnostically. Storage never drops below zero.
+- **Evaporation**: Exists as an independent ledger term, assumed zero unless externally supplied.
+- **Shared Root Zone Policy**: In cases where multiple plants request water simultaneously and supply is insufficient, a deterministic proportional allocation policy distributes the available water according to each plant's requested proportion.
+- **Unit Conversions**: Transpiration is converted from `mol m^-2 s^-1` using liquid water density of `998.2 kg/m^3` and molar mass `18.01528 g/mol` (constant `1.8047766e-5 m^3/mol`).
+- **Mass Balance Tolerance**: The acceptable floating-point tolerance for the mass-balance residual is strictly `< 1e-10 m^3`.

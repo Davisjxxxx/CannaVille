@@ -178,22 +178,42 @@
     },
     {
       "model_id": "rootzone.mass_balance",
-      "version": "1.0.0",
-      "purpose": "Strict conservation of water volume in substrates and reservoirs.",
-      "equation_or_algorithm": "new_water = old_water + irrigation - plant_withdrawal - drainage",
+      "version": "1.1.0",
+      "purpose": "Strict conservation of external water volume crossing the control-volume boundary.",
+      "equation_or_algorithm": "final_storage = initial_storage + irrigation + top_off + external_return_flow - realized_withdrawal - drainage - discharge - evaporation = residual",
       "inputs": [
         {
           "name": "irrigation",
           "unit": "m^3"
         },
         {
-          "name": "plant_withdrawal",
+          "name": "external_return_flow",
+          "unit": "m^3"
+        },
+        {
+          "name": "evaporation",
+          "unit": "m^3"
+        },
+        {
+          "name": "transpiration_requested",
           "unit": "m^3"
         }
       ],
       "outputs": [
         {
-          "name": "current_water",
+          "name": "current_water_volume",
+          "unit": "m^3"
+        },
+        {
+          "name": "realized_withdrawal",
+          "unit": "m^3"
+        },
+        {
+          "name": "unmet_demand",
+          "unit": "m^3"
+        },
+        {
+          "name": "drainage",
           "unit": "m^3"
         },
         {
@@ -210,10 +230,13 @@
       ],
       "publication_or_organization": "CannaVille",
       "doi_or_stable_identifier": "internal",
-      "valid_domain": "Water volume >= 0. Residual must be near zero.",
+      "valid_domain": "Water volume >= 0. Substrate bulk volume > 0. Residual strictly near zero.",
       "assumptions": [
-        "QUASI_STEADY_ROOT_UPTAKE_APPROXIMATION: Root uptake matches transpiration dynamically.",
-        "STORAGE_CAPACITY_OVERFLOW_APPROXIMATION: Excess water instantly drains."
+        "QUASI_STEADY_ROOT_UPTAKE_APPROXIMATION: Root uptake matches transpiration dynamically using SYNTHETIC_TEST_INPUT leaf area.",
+        "STORAGE_CAPACITY_OVERFLOW_APPROXIMATION: Excess water instantly drains.",
+        "Internal recirculation in DWC does not alter mass balance; only external_return_flow does.",
+        "Evaporation is strictly external/zero for now.",
+        "Mass balance tolerance < 1e-10 m3."
       ],
       "approximation_status": "mass conservation explicit",
       "calibration_status": "not_applicable",
@@ -222,10 +245,14 @@
         "test_rootzone_dry_down",
         "test_rootzone_pulsed_irrigation",
         "test_rootzone_dwc_reservoir",
-        "test_rootzone_robustness_sweep"
+        "test_rootzone_robustness_sweep",
+        "test_rootzone_shared_allocation",
+        "test_rootzone_exact_event_timing"
       ],
       "notes": [
-        "Explicitly tracks residual to guarantee physics integrity."
+        "VWC is exactly water_volume / substrate_bulk_volume.",
+        "storage_fraction is exactly water_volume / max_stored_water.",
+        "Conversion: 1 mol H2O = 1.8047766e-5 m3 (998.2 kg/m3 density)."
       ]
     }
   ]
