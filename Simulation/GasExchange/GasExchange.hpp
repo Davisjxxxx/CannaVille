@@ -49,6 +49,10 @@ struct MedlynParameters {
     double g1{3.0};  // slope parameter (kPa^0.5)
 };
 
+// Numerical domain guard for the Medlyn model to prevent division by zero or biologically 
+// meaningless infinite stomatal conductance at exactly zero VPD.
+constexpr double kMedlynMinimumVPDKPa = 0.05; // kPa, below which stomatal conductance is clamped/evaluated at this floor.
+
 struct CalibrationProfile {
     std::string id;
     FvCBParameters fvcb;
@@ -75,9 +79,9 @@ struct GasExchangeState {
 
 // Generic/unconfigured profile that cannot silently simulate
 CalibrationProfile get_unconfigured_profile();
-CalibrationProfile get_tang2017_reference_profile();
-CalibrationProfile get_medical2022_reference_profile();
-CalibrationProfile get_flowering_reference_profile();
+CalibrationProfile get_synthetic_vegetative_test_profile();
+CalibrationProfile get_synthetic_high_capacity_test_profile();
+CalibrationProfile get_synthetic_flowering_test_profile();
 
 // Fetch by ID
 CalibrationProfile get_profile(const std::string& id);
@@ -85,13 +89,13 @@ CalibrationProfile get_profile(const std::string& id);
 // Coupled solver
 // Assumptions for Medlyn:
 // - CO2 ambient (ca) is assumed to be leaf surface CO2 (cs), i.e., boundary layer conductance is deferred (infinite).
-// - VPD is leaf-to-air VPD.
+// - VPD is explicitly leaf-to-air VPD. If only air VPD is available, this should either be estimated or an approximation state must be explicitly requested.
 void solve_coupled_gas_exchange(
     GasExchangeState& state,
     const CalibrationProfile& profile,
     units::PPFDMicromolesPerSquareMeterSecond ppfd,
     units::CO2MicromolesPerMole ambient_co2,
-    units::VPDKPa vpd,
+    units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
     units::AtmosphericPressureKPa pressure
 );

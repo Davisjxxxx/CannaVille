@@ -60,6 +60,27 @@
       "implementation_location": "Simulation/GasExchange/GasExchange.cpp:solve_coupled_gas_exchange",
       "validation_tests": ["test_gas_exchange"],
       "notes": ["Fails explicitly if convergence is not reached; no silent fallbacks."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_vegetative",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for high-capacity vegetative state.",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived. See P1B_Water_Relations.md for Ci/Cc mismatch with Tang 2017."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_high_capacity",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for elevated capacity.",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_flowering",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for lower capacity (flowering proxy).",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived."]
     }
   ]
 }

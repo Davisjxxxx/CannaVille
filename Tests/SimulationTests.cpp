@@ -328,8 +328,8 @@ void test_gas_exchange() {
     using namespace cannaville::units;
     
     GasExchangeState state;
-    auto tang_profile = get_tang2017_reference_profile();
-    auto med_profile = get_medical2022_reference_profile();
+    auto tang_profile = get_synthetic_vegetative_test_profile();
+    auto med_profile = get_synthetic_high_capacity_test_profile();
     auto unconfigured = get_unconfigured_profile();
 
     // 1. Missing calibration profile
@@ -412,6 +412,67 @@ void test_spatial_physics_and_cli_fields() {
     require(restored.serialize_state() == serialized, "P1A spatial state did not round-trip exactly");
 }
 
+void test_gas_exchange_robustness_and_domain_guards() {
+    using namespace cannaville::gasexchange;
+    using namespace cannaville::units;
+    
+    GasExchangeState state;
+    auto tang_profile = get_synthetic_vegetative_test_profile();
+
+    // Test Near-Zero VPD (kMedlynMinimumVPDKPa)
+    // VPD of exactly 0.0 or 0.01 should behave exactly as kMedlynMinimumVPDKPa
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{0.0}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double gsw_zero_vpd = state.stomatal_conductance.value;
+    
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{0.01}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double gsw_micro_vpd = state.stomatal_conductance.value;
+    
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{1000}, CO2MicromolesPerMole{400}, VPDKPa{kMedlynMinimumVPDKPa}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    double gsw_floor_vpd = state.stomatal_conductance.value;
+
+    require_near(gsw_zero_vpd, gsw_floor_vpd, 1e-6, "Conductance at 0 VPD should be clamped to kMedlynMinimumVPDKPa floor");
+    require_near(gsw_micro_vpd, gsw_floor_vpd, 1e-6, "Conductance at 0.01 VPD should be clamped to kMedlynMinimumVPDKPa floor");
+
+    // Test Darkness/Negative Assimilation bounding
+    // If PPFD is 0, An will be negative, and gsw should be exactly g0 because A_for_medlyn is max(0, An)
+    solve_coupled_gas_exchange(state, tang_profile, PPFDMicromolesPerSquareMeterSecond{0}, CO2MicromolesPerMole{400}, VPDKPa{1.5}, Celsius{25}, AtmosphericPressureKPa{101.325});
+    require(state.net_assimilation.value < 0.0, "Dark assimilation must be negative (respiration only)");
+    require_near(state.stomatal_conductance.value, tang_profile.medlyn.g0, 1e-12, "Conductance in darkness (An < 0) must exactly equal g0");
+
+    // Robustness Sweep
+    // Sweep through various conditions including extremes, checking for NaNs and silent fallbacks
+    std::vector<double> ppfds = {0.0, 10.0, 100.0, 2000.0, 5000.0};
+    std::vector<double> co2s = {50.0, 400.0, 2000.0, 10000.0};
+    std::vector<double> temps = {5.0, 15.0, 25.0, 40.0, 60.0};
+    std::vector<double> vpds = {0.0, 0.5, 2.0, 10.0};
+
+    for (double ppfd : ppfds) {
+        for (double co2 : co2s) {
+            for (double temp : temps) {
+                for (double vpd : vpds) {
+                    GasExchangeState sweep_state;
+                    solve_coupled_gas_exchange(sweep_state, tang_profile, PPFDMicromolesPerSquareMeterSecond{ppfd}, CO2MicromolesPerMole{co2}, VPDKPa{vpd}, Celsius{temp}, AtmosphericPressureKPa{101.325});
+                    
+                    if (sweep_state.status == ConvergenceStatus::Converged) {
+                        require(!std::isnan(sweep_state.net_assimilation.value), "Assimilation became NaN during robustness sweep");
+                        require(!std::isnan(sweep_state.stomatal_conductance.value), "Conductance became NaN during robustness sweep");
+                        require(!std::isnan(sweep_state.intercellular_co2.value), "Intercellular CO2 became NaN during robustness sweep");
+                        
+                        require(sweep_state.stomatal_conductance.value >= tang_profile.medlyn.g0 - 1e-9, "Conductance fell below g0 during sweep");
+                        require(sweep_state.intercellular_co2.value >= 0.0, "Intercellular CO2 fell below zero");
+                    } else if (sweep_state.status == ConvergenceStatus::FailedToConverge) {
+                        require_near(sweep_state.net_assimilation.value, 0.0, 1e-12, "Failed convergence state should not output non-zero values silently");
+                    } else if (sweep_state.status == ConvergenceStatus::NegativeVPD) {
+                        require(vpd < 0.0, "NegativeVPD returned for non-negative VPD");
+                    } else {
+                        require(false, "Unexpected status during robustness sweep");
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -428,6 +489,7 @@ int main() {
         test_sub_timestep_boundaries();
         test_spatial_physics_and_cli_fields();
         test_gas_exchange();
+        test_gas_exchange_robustness_and_domain_guards();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
@@ -439,7 +501,8 @@ int main() {
                   << "PASS: DLI, photoperiod, and dark-interval accumulation\n"
                   << "PASS: sub-timestep boundary integration\n"
                   << "PASS: spatial physics and CSV inspection fields\n"
-                  << "PASS: gas exchange models\n";
+                  << "PASS: gas exchange models\n"
+                  << "PASS: gas exchange robustness and domain guards\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

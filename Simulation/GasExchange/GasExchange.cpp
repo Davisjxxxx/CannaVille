@@ -15,9 +15,9 @@ CalibrationProfile get_unconfigured_profile() {
     return p;
 }
 
-CalibrationProfile get_tang2017_reference_profile() {
+CalibrationProfile get_synthetic_vegetative_test_profile() {
     CalibrationProfile p;
-    p.id = "tang2017_vegetative_reference";
+    p.id = "synthetic_vegetative_test";
     p.is_configured = true;
     p.fvcb.vcmax25 = 100.0;
     p.fvcb.jmax25 = 150.0;
@@ -27,9 +27,9 @@ CalibrationProfile get_tang2017_reference_profile() {
     return p;
 }
 
-CalibrationProfile get_medical2022_reference_profile() {
+CalibrationProfile get_synthetic_high_capacity_test_profile() {
     CalibrationProfile p;
-    p.id = "medical2022_indoor_reference";
+    p.id = "synthetic_high_capacity_test";
     p.is_configured = true;
     p.fvcb.vcmax25 = 110.0;
     p.fvcb.jmax25 = 165.0;
@@ -39,9 +39,9 @@ CalibrationProfile get_medical2022_reference_profile() {
     return p;
 }
 
-CalibrationProfile get_flowering_reference_profile() {
+CalibrationProfile get_synthetic_flowering_test_profile() {
     CalibrationProfile p;
-    p.id = "cbd_hemp_flowering_reference";
+    p.id = "synthetic_flowering_test";
     p.is_configured = true;
     p.fvcb.vcmax25 = 60.0;
     p.fvcb.jmax25 = 90.0;
@@ -52,9 +52,9 @@ CalibrationProfile get_flowering_reference_profile() {
 }
 
 CalibrationProfile get_profile(const std::string& id) {
-    if (id == "tang2017_vegetative_reference") return get_tang2017_reference_profile();
-    if (id == "medical2022_indoor_reference") return get_medical2022_reference_profile();
-    if (id == "cbd_hemp_flowering_reference") return get_flowering_reference_profile();
+    if (id == "synthetic_vegetative_test") return get_synthetic_vegetative_test_profile();
+    if (id == "synthetic_high_capacity_test") return get_synthetic_high_capacity_test_profile();
+    if (id == "synthetic_flowering_test") return get_synthetic_flowering_test_profile();
     return get_unconfigured_profile();
 }
 
@@ -74,7 +74,7 @@ void solve_coupled_gas_exchange(
     const CalibrationProfile& profile,
     units::PPFDMicromolesPerSquareMeterSecond ppfd,
     units::CO2MicromolesPerMole ambient_co2,
-    units::VPDKPa vpd,
+    units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
     units::AtmosphericPressureKPa pressure
 ) {
@@ -88,10 +88,11 @@ void solve_coupled_gas_exchange(
         state.status = ConvergenceStatus::MissingLeafTemperature;
         return;
     }
-    if (vpd.value < 0.0) {
+    if (leaf_to_air_vpd.value < 0.0) {
         state.status = ConvergenceStatus::NegativeVPD;
         return;
     }
+
 
     double tk = leaf_temperature->value + 273.15;
     double tref = profile.fvcb.t_ref_k;
@@ -129,7 +130,7 @@ void solve_coupled_gas_exchange(
     double ca = ambient_co2.value; // Ambient CO2 assumed to be leaf surface CO2 (infinite boundary layer)
     double ci = ca * 0.7; // Initial guess
     
-    double D = std::max(0.01, vpd.value); // Prevent division by zero, min 0.01 kPa
+    double D = std::max(kMedlynMinimumVPDKPa, leaf_to_air_vpd.value); // Prevent division by zero and unrealistic infinite conductance at near-zero VPD
     double g0 = profile.medlyn.g0;
     double g1 = profile.medlyn.g1;
     
