@@ -1,35 +1,51 @@
 # P1B.4 Scientific Evidence: Hydraulic Stress in Cannabis sativa
 
 ## 1. Cannabis Sativa Drought Response
-*Cannabis sativa* demonstrates a highly coordinated physiological response to water deficit, primarily mediated through stomatal regulation to prevent excessive decline in leaf water potential ($\Psi_L$) and catastrophic xylem cavitation. The plant actively regulates stomatal conductance in response to water deficit to conserve water and maintain turgor.
+*Cannabis sativa* demonstrates a highly coordinated physiological response to water deficit. This response must be strictly separated into short-term physiological regulation and long-term acclimation. 
 
-### Peer-Reviewed Sources
-- Tang et al. (2018). "Photosynthetic response of Cannabis sativa L. to variations in photosynthetic photon flux densities, temperature and CO2 conditions." *Planta*.
-- Yep et al. (2020). "Cannabis yield, potency, and leaf photosynthesis respond differently to increasing soil moisture." *Frontiers in Plant Science*.
-- Caplan et al. (2017). "Optimal Rate of Organic Fertilizer during the Vegetative-stage for Cannabis Grown in Two Coir-based Substrates." *HortScience*.
-- Various studies indicating genotypic variation where some cultivars exhibit isohydric behavior (early stomatal closure) while others act more anisohydric.
+**Short-term physiological response:**
+- Stomatal closure
+- Reduction in net assimilation ($A_n$)
+- Reduction in transpiration
+- Declining leaf/plant water potential
 
-## 2. Thresholds for Severe Stress and Permanent Wilting Point (PWP)
-The Permanent Wilting Point (PWP) is classically defined as a matric potential of -1.5 MPa (or -15 bar, pF 4.2). At this threshold, water is held so tightly by the soil matrix that roots can no longer extract it, leading to irreversible turgor loss.
+**Long-term acclimation (Outside P1B.4.1 scope):**
+- Leaf-area changes (LAI reduction)
+- Stomatal morphology changes
+- Induced senescence
+- Biomass allocation shifts
 
-However, in controlled environment agriculture using soilless substrates, operational thresholds are often defined via Volumetric Water Content (VWC):
-- **Coco Coir:**
-  - Saturation occurs around 60-65% VWC.
-  - Optimal available water range is typically 35-45% VWC.
-  - Severe stress / Operational PWP is generally reached when VWC drops below ~30%. Below this, the remaining water is strongly bound, and localized salt concentrations cause severe osmotic stress.
-- **Rockwool:**
-  - Has a highly porous, inert structure with a more linear matric potential curve.
-  - Can sustain plant water uptake at lower absolute VWCs without visual stress compared to coco, but leaves very little margin for error. Severe stress happens rapidly when the remaining water film breaks.
+P1B.4.1 is strictly concerned with short-term physiological limitation (stomatal regulation). Long-term morphological adjustments belong to future canopy/growth systems.
 
-## 3. Substrate Water Retention Hysteresis
-Both coco coir and rockwool exhibit **hysteresis**—their water retention behavior differs depending on whether the medium is drying out (desorption) or being re-wetted (sorption). 
-- **Necessity to Model:** For real-time greenhouse control (e.g., steering via micro-irrigation pulses), hysteresis can be significant. However, for a generalized macroscopic simulation of plant growth (like CannaVille), tracking the primary desorption curve is typically sufficient. Explicit hysteresis modeling introduces state-tracking complexity and is recommended as an optional refinement rather than a core requirement for P1B.4.
+## 2. Peer-Reviewed Evidence Hierarchy
+### Controlled Drought Stress (Caplan et al., 2019)
+**Study:** Caplan, Dixon & Zheng (2019). "Increasing Inflorescence Dry Weight and Cannabinoid Content in Medical Cannabis Using Controlled Drought Stress". *HortScience*. DOI: 10.21273/HORTSCI13510-18.
+- **Context:** Applied controlled drought stress during the flowering stage.
+- **Treatment Criterion:** Used a midday plant water potential of approximately **−1.5 MPa** as the stress threshold. 
+- **Important Distinction:** The −1.5 MPa value used in this study is an **experimental treatment criterion**, representing severe stress applied to the plant. It must NOT be described as a universal Cannabis Permanent Wilting Point (PWP), a universal wilting point, a species constant, or a universal substrate threshold. 
 
-## 4. Stomatal Conductance ($g_s$) and Assimilation ($A_n$) Feedback
-Hydraulic stress in Cannabis limits carbon assimilation ($A_n$) primarily via stomatal closure ($g_s$ reduction), which restricts intercellular CO2 ($C_i$). Direct biochemical damage to the photosynthetic apparatus only occurs under extreme, prolonged stress.
-- As matric potential drops, hydraulic signaling and abscisic acid (ABA) accumulation trigger stomatal closure.
-- **Modeling Implications:** This necessitates upstream regulation of the stomatal conductance model rather than applying a generic downstream penalty directly to $A_n$.
+### Photosynthetic Response (Tang et al., 2018)
+**Study:** Tang et al. (2018). "Photosynthetic response of Cannabis sativa L. to variations in photosynthetic photon flux densities, temperature and CO2 conditions." *Planta*.
+- **Context:** Examines gas exchange and environmental responses.
+- **Relevance to P1B.4:** Confirms that short-term water shortage is primarily represented through stomatal regulation. It also notes that prolonged water shortage changed canopy traits (e.g., LAI, senescence).
+- **Modeling Constraint:** Because canopy traits fall under long-term acclimation, canopy model coefficients from Tang (2018) must NOT be directly transplanted into the current P1B.4 short-term leaf kernel without further compatibility review.
 
-## 5. Timescale of Recovery After Rewatering
-- **Immediate to Hours:** If the stress was mild to moderate (stomatal closure but no significant cavitation or root death), turgor recovery and stomatal reopening typically begin within minutes to hours after rewatering.
-- **Days/Irreversible:** If the substrate dried beyond the permanent wilting point, causing root desiccation or severe xylem cavitation, recovery can take days, or the plant may suffer permanent morphological damage and reduced yield potential.
+### Other Recent Evidence and Substrate Caution
+When reviewing controlled-environment Cannabis drought evidence, strict measurement semantics must be enforced. Specifically:
+- **Percent Container Capacity** must NOT be confused with **Volumetric Water Content (VWC)**. A treatment described as "20–30% of container capacity" cannot be rewritten as "20–30% VWC".
+- All claims of "saturation thresholds" or "severe stress thresholds" (e.g., historical claims of 60% VWC saturation or 30% VWC severe stress for coir) are removed unless tied to an explicitly identified, measured substrate profile. Universal thresholds are rejected.
+
+## 3. Substrate Hydraulics and Hysteresis
+Both stonewool and some soilless organic substrates exhibit physical hysteresis—the water retention curve differs between drying (desorption) and wetting (sorption).
+- **Hysteresis Boundary:** Hysteresis is a real phenomenon in substrate physics. However, to isolate system complexity, explicit hysteresis modeling is deferred for the first implementation (P1B.4.1). 
+- **Profile Requirement:** Because hysteresis is deferred, every modeled retention curve must explicitly identify whether its formulation represents a drying/desorption curve, a wetting/sorption curve, or an unknown/combined approximation. A non-hysteretic curve cannot be assumed to capture full substrate behavior.
+
+## 4. Parameter Classifications
+Every parameter used in the P1B.4 hydraulic subsystem must be classified using the following strict taxonomy. No generic production defaults are permitted.
+- `PHYSICAL_CONSTANT`
+- `SUBSTRATE_PROFILE`
+- `MODEL_PARAMETER`
+- `CANNABIS_REFERENCE`
+- `CULTIVAR_PROFILE`
+- `SYNTHETIC_TEST_VALUE`
+- `REQUIRES_CALIBRATION`
