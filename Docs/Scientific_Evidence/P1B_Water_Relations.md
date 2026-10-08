@@ -142,3 +142,11 @@ The current boundary-layer and transpiration models calculate leaf-area-normaliz
 - **Free-Convection Geometry**: The current free-convection Sherwood equation $Sh_{free} = 0.54(Gr \cdot Sc)^{0.25}$ (from Campbell & Norman 1998) is derived for a heated flat plate facing upward (or cooled facing downward). For P1B.2, this is applied as an isotropic bulk analog to prevent zero-conductance singularities at zero wind. It does not explicitly track leaf orientation angles.
 - **Mixed-Convection Semantics**: The `max(g_forced, g_free)` combination is explicitly documented as a `DOMINANT_MODE_APPROXIMATION`. It selects the physically dominant convection mode rather than computationally summing simultaneous free and forced convection.
 
+
+## B20. P1B.3 Root-Zone Water Mass Balance
+
+- **Mass Conservation**: The root-zone models (`SubstrateContainer` and `HydroponicReservoir`) strictly enforce water mass conservation. The mass balance equation is `new_water = old_water + irrigation + return_flow - plant_withdrawal - drainage - evaporation`. The `residual_m3` is explicitly tracked and must remain near zero.
+- **QUASI_STEADY_ROOT_UPTAKE_APPROXIMATION**: Leaf transpiration is scaled to whole-plant withdrawal using an explicitly supplied `effective_transpiring_leaf_area_m2`. This implies that root uptake dynamically balances leaf transpiration over the timestep.
+- **STORAGE_CAPACITY_OVERFLOW_APPROXIMATION**: Both substrate and reservoir models currently approximate excess water (beyond `max_capacity_m3`) as immediate drainage/overflow, rather than modeling complex matric potential pooling or transient flooding states.
+- **Volumetric Water Content (VWC)**: For `SubstrateContainer`, VWC is calculated physically as `current_water_m3 / volume_m3` and treated as a purely physical property, not yet biologically coupled to hydraulic stress or root conductivity.
+- **Insufficient Water State**: If the volume requested by transpiration exceeds available water, an explicit `INSUFFICIENT_ROOTZONE_WATER` state is reported, and only the remaining volume is withdrawn. Negative storage or silent stomatal clamping is strictly prohibited in this baseline conservation layer.

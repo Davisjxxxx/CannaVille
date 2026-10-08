@@ -94,4 +94,20 @@ struct SimulationStepCount {
     std::uint64_t value{};
 };
 
+struct VolumeCubicMeters {
+    double value{};
+};
+
+struct AreaSquareMeters {
+    double value{};
+};
+
+struct WaterMoles {
+    double value{};
+};
+
+struct WaterFluxMolesPerSquareMeterSecond {
+    double value{};
+};
+
 } // namespace cannaville::units
