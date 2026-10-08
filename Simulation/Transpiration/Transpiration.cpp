@@ -40,8 +40,8 @@ BoundaryLayerConductance calculate_boundary_layer_conductance(
     BoundaryLayerConductance result;
     
     if (characteristic_dimension.value <= 0.0) {
-        result.is_forced_convection_valid = false;
-        result.regime = "invalid_dimension";
+        result.status = ScientificDomainStatus::InvalidDimension;
+        result.regime = "unsupported";
         return result;
     }
     
@@ -73,20 +73,22 @@ BoundaryLayerConductance calculate_boundary_layer_conductance(
     }
     
     // Combined convection (mixed regime)
+    // DOMINANT_MODE_APPROXIMATION:
     // We take the maximum to ensure physically plausible conductance at zero wind speed.
     double Sh_mixed = std::max(Sh_forced, Sh_free);
     
     if (Sh_mixed == Sh_free && u < 0.1 && delta_t > 0.0) {
-        result.regime = "free_convection";
+        result.regime = "free_convection_dominant";
     } else if (Sh_mixed == Sh_forced) {
-        result.regime = "forced_convection";
+        result.regime = "forced_convection_dominant";
     } else {
         result.regime = "mixed_convection";
     }
     
     if (Re > 20000.0) {
-        result.is_forced_convection_valid = false;
+        result.status = ScientificDomainStatus::UnsupportedFlowRegime;
         result.regime = "turbulent_unsupported";
+        return result; // Explicitly do not return a valid laminar conductance
     }
     
     double g_bw_ms = (dv / d) * Sh_mixed;
@@ -107,9 +109,14 @@ TranspirationResult calculate_transpiration(
         result.status = "invalid_pressure";
         return result;
     }
+
+    if (!boundary_layer.value_mol_m2_s.has_value()) {
+        result.status = "unsupported_boundary_layer";
+        return result;
+    }
     
     double gs = stomatal_conductance.value;
-    double gb = boundary_layer.value_mol_m2_s;
+    double gb = boundary_layer.value_mol_m2_s.value();
     
     // Series resistance for a single transpiring surface (e.g. hypostomatous leaf)
     // If amphistomatous, this represents total effective per-unit-area conductance.

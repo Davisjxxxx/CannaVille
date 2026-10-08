@@ -484,28 +484,36 @@ void test_transpiration() {
 
     // 2. Boundary Layer Conductance (Forced Convection)
     auto gb_forced = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
-    require(gb_forced.value_mol_m2_s > 0.0, "Forced convection gb failed");
-    require(gb_forced.regime == "forced_convection", "Regime should be forced");
+    require(gb_forced.status == ScientificDomainStatus::Valid, "Forced convection gb failed status");
+    require(gb_forced.value_mol_m2_s.value() > 0.0, "Forced convection gb failed value");
+    require(gb_forced.regime == "forced_convection_dominant", "Regime should be forced_convection_dominant");
 
     auto gb_faster = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{2.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
-    require(gb_faster.value_mol_m2_s > gb_forced.value_mol_m2_s, "Higher wind should increase gb");
+    require(gb_faster.value_mol_m2_s.value() > gb_forced.value_mol_m2_s.value(), "Higher wind should increase gb");
 
     auto gb_larger = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{0.10}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
-    require(gb_larger.value_mol_m2_s < gb_forced.value_mol_m2_s, "Larger leaf should decrease gb");
+    require(gb_larger.value_mol_m2_s.value() < gb_forced.value_mol_m2_s.value(), "Larger leaf should decrease gb");
 
     // 3. Boundary Layer Conductance (Free Convection)
     auto gb_free = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{0.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{25.0}, cannaville::units::Celsius{20.0});
-    require(gb_free.value_mol_m2_s > 0.0, "Free convection gb failed");
-    require(gb_free.regime == "free_convection", "Regime should be free");
+    require(gb_free.value_mol_m2_s.value() > 0.0, "Free convection gb failed");
+    require(gb_free.regime == "free_convection_dominant", "Regime should be free_convection_dominant");
 
     // 4. Invalid dimension
     auto gb_invalid = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{-0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
-    require(gb_invalid.regime == "invalid_dimension", "Invalid dimension not caught");
+    require(gb_invalid.status == ScientificDomainStatus::InvalidDimension, "Invalid dimension not caught");
+    require(gb_invalid.regime == "unsupported", "Invalid dimension regime wrong");
+    
+    // 4b. Turbulent flow
+    auto gb_turbulent = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{100.0}, cannaville::units::Meters{1.0}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
+    require(gb_turbulent.status == ScientificDomainStatus::UnsupportedFlowRegime, "Turbulent flow not caught");
+    require(gb_turbulent.regime == "turbulent_unsupported", "Turbulent flow regime wrong");
+    require(!gb_turbulent.value_mol_m2_s.has_value(), "Turbulent flow should not return a valid conductance");
 
     // 5. Transpiration Calculation
     auto trans = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{1.5}, cannaville::units::AtmosphericPressureKPa{101.325});
     require(trans.flux_mol_m2_s > 0.0, "Transpiration flux failed");
-    require(trans.total_conductance_mol_m2_s < 0.1 && trans.total_conductance_mol_m2_s < gb_forced.value_mol_m2_s, "Series conductance must be less than individual components");
+    require(trans.total_conductance_mol_m2_s < 0.1 && trans.total_conductance_mol_m2_s < gb_forced.value_mol_m2_s.value(), "Series conductance must be less than individual components");
 
     // 6. Condensation (Negative VPD)
     auto trans_cond = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{-0.5}, cannaville::units::AtmosphericPressureKPa{101.325});
@@ -528,6 +536,10 @@ void test_transpiration_robustness_sweep() {
     std::vector<double> gs = {0.0, 0.01, 0.5};
     std::vector<double> vpd = {-1.0, 0.0, 2.0};
 
+    int numerically_valid = 0;
+    int scientifically_unsupported = 0;
+    int numerically_invalid = 0;
+
     for (double u : us) {
         for (double d : ds) {
             for (double t_a : ta) {
@@ -539,8 +551,17 @@ void test_transpiration_robustness_sweep() {
                                 auto gb = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{u}, cannaville::units::Meters{d}, props, cannaville::units::Celsius{t_l}, cannaville::units::Celsius{t_a});
                                 auto trans = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{g}, gb, cannaville::units::VPDKPa{v}, cannaville::units::AtmosphericPressureKPa{p});
                                 
-                                require(!std::isnan(gb.value_mol_m2_s) && !std::isinf(gb.value_mol_m2_s) && gb.value_mol_m2_s >= 0.0, "Invalid gb value in robustness sweep");
-                                require(!std::isnan(trans.flux_mol_m2_s) && !std::isinf(trans.flux_mol_m2_s), "Invalid transpiration flux in robustness sweep");
+                                if (gb.status == ScientificDomainStatus::Valid) {
+                                    if (std::isnan(gb.value_mol_m2_s.value()) || std::isinf(gb.value_mol_m2_s.value())) {
+                                        numerically_invalid++;
+                                    } else {
+                                        numerically_valid++;
+                                    }
+                                } else if (gb.status == ScientificDomainStatus::UnsupportedFlowRegime || gb.status == ScientificDomainStatus::InvalidDimension) {
+                                    scientifically_unsupported++;
+                                } else {
+                                    numerically_invalid++;
+                                }
                             }
                         }
                     }
@@ -548,6 +569,14 @@ void test_transpiration_robustness_sweep() {
             }
         }
     }
+    
+    std::cout << "Robustness sweep counts:\n";
+    std::cout << "  NUMERICALLY_VALID: " << numerically_valid << "\n";
+    std::cout << "  SCIENTIFICALLY_UNSUPPORTED: " << scientifically_unsupported << "\n";
+    std::cout << "  NUMERICALLY_INVALID: " << numerically_invalid << "\n";
+    
+    require(numerically_invalid == 0, "Encountered numerically invalid states during sweep");
+    require(scientifically_unsupported > 0, "Did not encounter expected unsupported scientific domains (e.g., turbulence)");
 }
 
 } // namespace

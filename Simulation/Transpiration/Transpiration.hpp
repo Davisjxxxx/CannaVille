@@ -18,10 +18,16 @@ AirProperties calculate_air_properties(
     units::AtmosphericPressureKPa pressure
 );
 
+enum class ScientificDomainStatus {
+    Valid,
+    UnsupportedFlowRegime,
+    InvalidDimension
+};
+
 struct BoundaryLayerConductance {
-    double value_mol_m2_s{0.0};
-    bool is_forced_convection_valid{true};
-    std::string regime{"forced"};
+    std::optional<double> value_mol_m2_s{std::nullopt};
+    ScientificDomainStatus status{ScientificDomainStatus::Valid};
+    std::string regime{"uninitialized"};
 };
 
 BoundaryLayerConductance calculate_boundary_layer_conductance(
