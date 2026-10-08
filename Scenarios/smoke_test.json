@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "scenario_id": "smoke-test",
+  "simulation_version": "0.1.0-bootstrap",
+  "fixed_timestep_seconds": 900,
+  "rooms": [
+    {
+      "id": "room-a",
+      "width_m": 4,
+      "depth_m": 4,
+      "cell_size_m": 1
+    }
+  ],
+  "plants": [
+    {
+      "id": "plant-a",
+      "room_id": "room-a",
+      "cultivar_id": "placeholder-cultivar",
+      "x_m": 0.5,
+      "y_m": 0.5,
+      "z_m": 0
+    }
+  ]
+}

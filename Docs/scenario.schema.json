@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaville.invalid/schema/scenario-v1.json",
+  "title": "CannaVille V2 simulation scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scenario_id", "simulation_version", "fixed_timestep_seconds", "rooms", "plants"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "scenario_id": {"type": "string", "minLength": 1},
+    "simulation_version": {"type": "string", "minLength": 1},
+    "fixed_timestep_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 86400},
+    "rooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "width_m", "depth_m", "cell_size_m"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "width_m": {"type": "number", "exclusiveMinimum": 0},
+          "depth_m": {"type": "number", "exclusiveMinimum": 0},
+          "cell_size_m": {"type": "number", "exclusiveMinimum": 0}
+        }
+      }
+    },
+    "plants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "room_id", "cultivar_id", "x_m", "y_m", "z_m"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "room_id": {"type": "string", "minLength": 1},
+          "cultivar_id": {"type": "string", "minLength": 1},
+          "x_m": {"type": "number", "minimum": 0},
+          "y_m": {"type": "number", "minimum": 0},
+          "z_m": {"type": "number", "minimum": 0}
+        }
+      }
+    }
+  }
+}

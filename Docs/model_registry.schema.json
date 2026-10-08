@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaville.invalid/schema/model-registry-v1.json",
+  "title": "CannaVille model registry entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model_id", "version", "status", "approximation_class", "scientific_sources", "variables", "constants", "regression_scenarios"],
+  "properties": {
+    "model_id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "status": {"enum": ["placeholder", "proposed", "implemented", "calibrated", "validated", "retired"]},
+    "approximation_class": {"enum": ["scientific_model", "calibrated_model", "engineering_approximation", "gameplay_approximation", "placeholder"]},
+    "scientific_sources": {"type": "array", "items": {"type": "object", "required": ["citation", "source_type"], "properties": {"citation": {"type": "string"}, "source_type": {"type": "string"}}}},
+    "variables": {"type": "array", "items": {"type": "object", "required": ["name", "unit", "role"], "properties": {"name": {"type": "string"}, "unit": {"type": "string"}, "role": {"enum": ["input", "state", "output", "derived"]}, "valid_range": {"type": "string"}}}},
+    "constants": {"type": "array", "items": {"type": "object", "required": ["name", "value", "units", "source", "calibration_status", "valid_range"], "properties": {"name": {"type": "string"}, "value": {}, "units": {"type": "string"}, "source": {"type": "string"}, "calibration_status": {"type": "string"}, "valid_range": {"type": "string"}}}},
+    "regression_scenarios": {"type": "array", "items": {"type": "string"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "gameplay_parameters": {"type": "array", "items": {"type": "string"}}
+  }
+}
