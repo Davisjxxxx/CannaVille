@@ -14,6 +14,7 @@ add_library(cannaville_sim
     Simulation/Environment/VaporPressure.cpp
     Simulation/Lighting/LightingSystem.cpp
     Simulation/GasExchange/GasExchange.cpp
+    Simulation/Transpiration/Transpiration.cpp
 )
 
 target_include_directories(cannaville_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

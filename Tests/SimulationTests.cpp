@@ -1,3 +1,4 @@
+#include "Simulation/Transpiration/Transpiration.hpp"
 #include "Simulation/Core/DeterministicRng.hpp"
 #include "Simulation/Core/Scenario.hpp"
 #include "Simulation/Core/Simulation.hpp"
@@ -473,6 +474,82 @@ void test_gas_exchange_robustness_and_domain_guards() {
     }
 }
 
+void test_transpiration() {
+    using namespace cannaville::transpiration;
+
+    // 1. Air Properties
+    auto props = calculate_air_properties(cannaville::units::Celsius{20.0}, cannaville::units::AtmosphericPressureKPa{101.325});
+    require_near(props.molar_density, 41.6, 1.0, "Molar density calculation failed");
+    require_near(props.kinematic_viscosity, 1.5e-5, 1e-6, "Kinematic viscosity failed");
+
+    // 2. Boundary Layer Conductance (Forced Convection)
+    auto gb_forced = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
+    require(gb_forced.value_mol_m2_s > 0.0, "Forced convection gb failed");
+    require(gb_forced.regime == "forced_convection", "Regime should be forced");
+
+    auto gb_faster = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{2.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
+    require(gb_faster.value_mol_m2_s > gb_forced.value_mol_m2_s, "Higher wind should increase gb");
+
+    auto gb_larger = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{0.10}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
+    require(gb_larger.value_mol_m2_s < gb_forced.value_mol_m2_s, "Larger leaf should decrease gb");
+
+    // 3. Boundary Layer Conductance (Free Convection)
+    auto gb_free = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{0.0}, cannaville::units::Meters{0.05}, props, cannaville::units::Celsius{25.0}, cannaville::units::Celsius{20.0});
+    require(gb_free.value_mol_m2_s > 0.0, "Free convection gb failed");
+    require(gb_free.regime == "free_convection", "Regime should be free");
+
+    // 4. Invalid dimension
+    auto gb_invalid = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{1.0}, cannaville::units::Meters{-0.05}, props, cannaville::units::Celsius{20.0}, cannaville::units::Celsius{20.0});
+    require(gb_invalid.regime == "invalid_dimension", "Invalid dimension not caught");
+
+    // 5. Transpiration Calculation
+    auto trans = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{1.5}, cannaville::units::AtmosphericPressureKPa{101.325});
+    require(trans.flux_mol_m2_s > 0.0, "Transpiration flux failed");
+    require(trans.total_conductance_mol_m2_s < 0.1 && trans.total_conductance_mol_m2_s < gb_forced.value_mol_m2_s, "Series conductance must be less than individual components");
+
+    // 6. Condensation (Negative VPD)
+    auto trans_cond = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{-0.5}, cannaville::units::AtmosphericPressureKPa{101.325});
+    require(trans_cond.status == "condensation", "Condensation not caught");
+    require(trans_cond.flux_mol_m2_s < 0.0, "Condensation flux must be negative");
+
+    // 7. Zero Gradient
+    auto trans_zero = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{0.0}, cannaville::units::AtmosphericPressureKPa{101.325});
+    require_near(trans_zero.flux_mol_m2_s, 0.0, 1e-12, "Zero VPD should give zero flux");
+}
+
+void test_transpiration_robustness_sweep() {
+    using namespace cannaville::transpiration;
+    
+    std::vector<double> us = {0.0, 0.01, 1.0, 10.0, 100.0};
+    std::vector<double> ds = {0.01, 0.1, 1.0};
+    std::vector<double> ta = {10.0, 25.0, 40.0};
+    std::vector<double> tl = {10.0, 25.0, 45.0};
+    std::vector<double> ps = {50.0, 101.325};
+    std::vector<double> gs = {0.0, 0.01, 0.5};
+    std::vector<double> vpd = {-1.0, 0.0, 2.0};
+
+    for (double u : us) {
+        for (double d : ds) {
+            for (double t_a : ta) {
+                for (double t_l : tl) {
+                    for (double p : ps) {
+                        for (double g : gs) {
+                            for (double v : vpd) {
+                                auto props = calculate_air_properties(cannaville::units::Celsius{t_a}, cannaville::units::AtmosphericPressureKPa{p});
+                                auto gb = calculate_boundary_layer_conductance(cannaville::units::AirflowMetersPerSecond{u}, cannaville::units::Meters{d}, props, cannaville::units::Celsius{t_l}, cannaville::units::Celsius{t_a});
+                                auto trans = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{g}, gb, cannaville::units::VPDKPa{v}, cannaville::units::AtmosphericPressureKPa{p});
+                                
+                                require(!std::isnan(gb.value_mol_m2_s) && !std::isinf(gb.value_mol_m2_s) && gb.value_mol_m2_s >= 0.0, "Invalid gb value in robustness sweep");
+                                require(!std::isnan(trans.flux_mol_m2_s) && !std::isinf(trans.flux_mol_m2_s), "Invalid transpiration flux in robustness sweep");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -490,6 +567,8 @@ int main() {
         test_spatial_physics_and_cli_fields();
         test_gas_exchange();
         test_gas_exchange_robustness_and_domain_guards();
+        test_transpiration();
+        test_transpiration_robustness_sweep();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
@@ -502,7 +581,9 @@ int main() {
                   << "PASS: sub-timestep boundary integration\n"
                   << "PASS: spatial physics and CSV inspection fields\n"
                   << "PASS: gas exchange models\n"
-                  << "PASS: gas exchange robustness and domain guards\n";
+                  << "PASS: gas exchange robustness and domain guards\n"
+                  << "PASS: transpiration\n"
+                  << "PASS: transpiration robustness sweep\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
