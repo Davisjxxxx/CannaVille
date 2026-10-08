@@ -102,3 +102,43 @@ The current FvCB solver in CannaVille is explicitly **Ci-based** (intercellular 
 **6. Temperature Response Parameters**
 *   **Current State:** The activation energies (e.g., `ea_vcmax`, `ea_jmax`), deactivation energies (`hd`), and entropy terms (`sv`) used in the `arrhenius` and `peaked_arrhenius` temperature response functions are currently standard generic C3 parameters (e.g., Bernacchi et al. 2001 or similar). They are classified as **NON_CANNABIS_REFERENCE** / **SYNTHETIC_TEST_VALUE**.
 *   **Future Requirement:** To support specific Cannabis cultivars, temperature response curves must be explicitly calibrated from Cannabis-specific gas-exchange data.
+
+## B15. P1B.2 Boundary-Layer Physics
+
+- **Forced Convection**: Boundary layer conductance over a flat plate in laminar flow is calculated using $Sh = 0.66 Re^{1/2} Sc^{1/3}$ (Campbell & Norman 1998, Eq 7.28). This assumes the leaf behaves aerodynamically as a flat plate and that the flow is laminar ($Re < 20,000$).
+- **Free Convection**: In near-zero wind conditions, buoyancy-driven free convection becomes significant. Calculated via Grashof number $Gr$, with $Sh = 0.54 (Gr Sc)^{1/4}$ (Campbell & Norman 1998, Eq 7.33).
+- **Mixed Convection / Regime Handling**: We calculate both forced and free convection Sherwood numbers and take the maximum to ensure a strictly positive, physically plausible conductance at zero or very low air velocities. 
+- **Characteristic Leaf Dimension**: The effective length $d$ of the leaf in the direction of airflow. For P1B.2 this is an explicit model parameter (e.g. 0.05m to 0.10m for typical leaves).
+- **Airflow Effects**: Higher air velocity increases conductance. Very large leaves reduce conductance (thicker boundary layer).
+- **Transport Coefficients**: 
+  - Kinematic viscosity ($\nu$) and vapor diffusivity ($D_v$) are computed dynamically based on air temperature and atmospheric pressure, scaled by $(T/273.15)^{1.75}$ and $(101.325/P)$ according to Campbell & Norman (1998).
+- **Assumptions**: Flow is assumed laminar. Turbulence induced by dense canopy geometry is not modeled explicitly in this foundational flat-plate simplification.
+
+## B16. P1B.2 Transpiration Physics
+
+- **Stomatal Conductance**: Sourced from the FvCB + Medlyn coupled solver (P1B.1).
+- **Boundary-Layer Conductance**: As detailed above. Both converted to $mol\ m^{-2}\ s^{-1}$.
+- **Total Conductance (Series Resistance)**: Treated as a series resistance pathway: $g_{total} = \frac{g_s \cdot g_b}{g_s + g_b}$. This is a simplified per-unit-transpiring-area formulation (assumes one-sided/hypostomatous, or treats $g_s$ as the total equivalent area-weighted conductance). Amphistomatous complexities are deferred.
+- **Leaf-Air Vapor Gradient**: The driving gradient is the mole fraction difference of water vapor, $\Delta w = \frac{VPD}{P_{atm}}$, where VPD is the leaf-to-air vapor pressure difference ($e_s(T_{leaf}) - e_a$).
+- **Transpiration Flux**: Calculated as $E = g_{total} \times \Delta w$, returning $mol\ m^{-2}\ s^{-1}$.
+- **Atmospheric-Pressure Conversion**: Pressure is explicitly passed in kPa to properly convert VPD (kPa) to mole fraction (mol/mol).
+
+## B17. P1B.2 Cannabis Relevance
+
+Cannabis/hemp water-use studies relevant for later validation (not used for foundational leaf boundary constants, which are physics-based):
+- **Powell & Bauerle (2026)**: "Predicting vegetative phase nutrient uptake in Cannabis sativa L. via transpiration-driven mass-balance." (Useful for whole-plant aggregation and nutrient validation in future phases).
+- **Cannabis empirical ET**: Note that whole-plant empirical water-use values reported in greenhouse studies include canopy aerodynamic resistance (complex $g_b$). These should not be directly inverted to fit a leaf-level $g_b$ without separating $g_s$.
+
+## B18. Whole-Plant Coupling Contract
+
+The current boundary-layer and transpiration models calculate leaf-area-normalized flux ($mol\ H_2O\ m^{-2}\ s^{-1}$). To aggregate this into a whole-plant mass balance, the following boundary contract is established:
+`whole_plant_water_loss = leaf_area_normalized_flux × effective_transpiring_leaf_area_m2`
+
+**Crucially, `effective_transpiring_leaf_area_m2` is not modeled in P1B.2.** It is an externally supplied parameter. Any values used in testing for P1B.3 must be labeled `SYNTHETIC_TEST_INPUT`. We do not create a default cannabis leaf area until a proper canopy/growth subsystem owns it.
+
+## B19. P1B.2A Flow Domains and Semantics
+
+- **Reynolds Transition ($Re = 20,000$)**: This threshold is an explicit MODEL/IMPLEMENTATION DOMAIN assumption, not a universal biological transition. Real-world Cannabis leaves may transition to turbulence earlier or later depending on trichome density, leaf flutter, edge roughness, and free-stream turbulence. Our engine intentionally rejects calculations above this limit (Option A: Conservative domain failure) rather than silently returning a laminar correlation in a turbulent regime.
+- **Free-Convection Geometry**: The current free-convection Sherwood equation $Sh_{free} = 0.54(Gr \cdot Sc)^{0.25}$ (from Campbell & Norman 1998) is derived for a heated flat plate facing upward (or cooled facing downward). For P1B.2, this is applied as an isotropic bulk analog to prevent zero-conductance singularities at zero wind. It does not explicitly track leaf orientation angles.
+- **Mixed-Convection Semantics**: The `max(g_forced, g_free)` combination is explicitly documented as a `DOMINANT_MODE_APPROXIMATION`. It selects the physically dominant convection mode rather than computationally summing simultaneous free and forced convection.
+
