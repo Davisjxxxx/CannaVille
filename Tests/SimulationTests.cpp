@@ -281,6 +281,46 @@ void test_dli_and_photoperiod_accumulation() {
                  "DLI changed with fixed-step partitioning");
 }
 
+void test_sub_timestep_boundaries() {
+    using cannaville::lighting::LightingSchedule;
+    using cannaville::lighting::LightingScheduleSegment;
+    using cannaville::lighting::LightingState;
+    using cannaville::units::PPFDMicromolesPerSquareMeterSecond;
+    using cannaville::units::Seconds;
+
+    LightingSchedule variable{{
+        LightingScheduleSegment{Seconds{1000}, Seconds{2000}, PPFDMicromolesPerSquareMeterSecond{100}},
+        LightingScheduleSegment{Seconds{2000}, Seconds{3000}, PPFDMicromolesPerSquareMeterSecond{200}},
+    }};
+
+    // light-on transition inside timestep
+    LightingState state;
+    cannaville::lighting::initialize_state(state, variable, 0.0);
+    cannaville::lighting::advance_state(state, variable, 500.0, 1000.0);
+    require_near(state.dli.value, (100 * 500) / 1e6, 1e-12, "light-on transition inside timestep DLI");
+    require_near(state.accumulated_light_on_duration.value, 500.0, 1e-12, "light-on transition duration");
+    require_near(state.photoperiod_duration.value, 2000.0, 1e-12, "photoperiod duration inside timestep");
+
+    // PPFD value change inside timestep
+    state = LightingState{};
+    cannaville::lighting::initialize_state(state, variable, 1500.0);
+    cannaville::lighting::advance_state(state, variable, 1500.0, 1000.0);
+    require_near(state.dli.value, (100 * 500 + 200 * 500) / 1e6, 1e-12, "PPFD value change inside timestep DLI");
+
+    // light-off transition inside timestep
+    state = LightingState{};
+    cannaville::lighting::initialize_state(state, variable, 2500.0);
+    cannaville::lighting::advance_state(state, variable, 2500.0, 1000.0);
+    require_near(state.dli.value, (200 * 500) / 1e6, 1e-12, "light-off transition inside timestep DLI");
+    require_near(state.accumulated_dark_duration.value, 500.0, 1e-12, "light-off dark duration inside timestep");
+
+    // day rollover inside timestep
+    state = LightingState{};
+    cannaville::lighting::initialize_state(state, variable, 86000.0);
+    cannaville::lighting::advance_state(state, variable, 86000.0, 1500.0);
+    require_near(state.dli.value, (100 * 100) / 1e6, 1e-12, "day rollover inside timestep DLI");
+}
+
 void test_spatial_physics_and_cli_fields() {
     const auto scenario = cannaville::core::Scenario::load_json(p1a_json);
     cannaville::core::Simulation simulation(scenario, 5);
@@ -324,6 +364,7 @@ int main() {
         test_saturation_vapor_pressure_reference_points();
         test_vapor_pressure_vpd_and_leaf_semantics();
         test_dli_and_photoperiod_accumulation();
+        test_sub_timestep_boundaries();
         test_spatial_physics_and_cli_fields();
         std::cout << "PASS: deterministic repeated runs\n"
                   << "PASS: isolated seeds and explicit RNG streams\n"
@@ -334,6 +375,7 @@ int main() {
                   << "PASS: saturation vapor pressure reference points\n"
                   << "PASS: vapor pressure, air VPD, and leaf VPD semantics\n"
                   << "PASS: DLI, photoperiod, and dark-interval accumulation\n"
+                  << "PASS: sub-timestep boundary integration\n"
                   << "PASS: spatial physics and CSV inspection fields\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

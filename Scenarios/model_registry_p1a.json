@@ -73,7 +73,7 @@
       "authors": ["Richard G. Allen", "Luis S. Pereira", "Dirk Raes", "Martin Smith"],
       "publication_or_organization": "Food and Agriculture Organization of the United Nations",
       "doi_or_stable_identifier": "https://www.fao.org/4/X0490E/x0490e07.htm",
-      "valid_domain": "Explicit leaf temperature in the registered FAO-56 temperature domain; otherwise unavailable",
+      "valid_domain": "Explicit leaf temperature in the registered implementation temperature domain; otherwise unavailable",
       "assumptions": ["The ambient actual vapor pressure is used for the leaf boundary calculation.", "Negative results are retained as condensation conditions, not clamped.", "Air temperature is never substituted for unavailable leaf temperature."],
       "approximation_status": "engineering extension of the sourced vapor-pressure-deficit definition; not calibrated to a cannabis canopy",
       "calibration_status": "not_calibrated; distinct-temperature tested",

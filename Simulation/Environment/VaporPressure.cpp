@@ -8,9 +8,9 @@
 namespace cannaville::environment {
 
 units::VaporPressureKPa saturation_vapor_pressure_fao56(units::Celsius temperature) {
-    if (!std::isfinite(temperature.value) || temperature.value < kFao56MinimumTemperatureCelsius ||
-        temperature.value > kFao56MaximumTemperatureCelsius) {
-        throw std::invalid_argument("FAO-56 saturation vapor pressure requires 0 <= temperature_c <= 50");
+    if (!std::isfinite(temperature.value) || temperature.value < kSupportedMinimumTemperatureCelsius ||
+        temperature.value > kSupportedMaximumTemperatureCelsius) {
+        throw std::invalid_argument("Implementation supported domain requires 0 <= temperature_c <= 50");
     }
     const double numerator = 17.27 * temperature.value;
     const double denominator = temperature.value + 237.3;

@@ -8,8 +8,8 @@ namespace cannaville::environment {
 
 struct EnvironmentState;
 
-constexpr double kFao56MinimumTemperatureCelsius = 0.0;
-constexpr double kFao56MaximumTemperatureCelsius = 50.0;
+constexpr double kSupportedMinimumTemperatureCelsius = 0.0;
+constexpr double kSupportedMaximumTemperatureCelsius = 50.0;
 
 units::VaporPressureKPa saturation_vapor_pressure_fao56(units::Celsius temperature);
 units::VaporPressureKPa actual_vapor_pressure_from_relative_humidity(
