@@ -5,8 +5,8 @@
 | Area | Bootstrap responsibility | Future responsibility |
 |---|---|---|
 | `Simulation/Core` | clock, timestep, scenario validation, serialization, action boundary | orchestration, version migration, event ordering |
-| `Environment` | room-cell environment state | causal room and cell environmental models |
-| `Lighting` | PPFD/DLI/photoperiod state shape | governed lighting and canopy sampling models |
+| `Environment` | room-cell measurements plus sourced vapor-pressure/VPD derivations | later causal room and cell environmental models |
+| `Lighting` | explicit PPFD schedules, DLI integration, photoperiod bookkeeping | fixture/control models and later canopy sampling models |
 | `Plants` | plant identity, location, state separation | plant development and phenotype models |
 | `RootZone` | moisture, root-zone temperature, pH, EC state shape | substrate, root, water, oxygen, and root-zone models |
 | `Nutrition` | solution/profile identity and model status | nutrient availability and uptake models |
@@ -29,7 +29,15 @@ Each plant contains explicitly separated categories:
 - `stochastic`: explicit seed and draw accounting
 - `history`: elapsed and cumulative state
 
-The room contains spatial cells. Plants retain their location and sample a cell's environment and lighting state. The bootstrap performs only pass-through sampling; it does not implement CFD or biological response.
+The room contains spatial cells. Plants retain their location and sample a cell's environment and lighting state. P1A derives physical vapor-pressure measurements per cell and integrates supplied PPFD schedules per cell. It does not implement CFD, fixture optics, canopy attenuation, or biological response.
+
+The original regular-grid lookup remains the default. Explicit scenario cell layouts use deterministic nearest-cell selection so irregular test fixtures can be represented without interpolation. No environmental interpolation is performed.
+
+Horticultural light state is separate from rendering light state. PPFD is supplied as a physical measurement or scenario input; it is never derived from Unreal or renderer brightness.
+
+Leaf temperature is optional. Missing leaf temperature produces unavailable leaf VPD; air temperature is never silently substituted.
+
+Simulation days are explicit 86,400-second intervals from simulation time. DLI and exposure-duration accumulators reset at those boundaries; wall-clock midnight is not consulted.
 
 ## Deterministic execution contract
 

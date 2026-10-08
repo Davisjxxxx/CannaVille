@@ -1,0 +1,86 @@
+{
+  "registry_version": 1,
+  "entries": [
+    {
+      "model_id": "plants.gas_exchange.fvcb",
+      "version": "1.0.0",
+      "purpose": "Calculate C3 net assimilation based on the Farquhar-von Caemmerer-Berry model.",
+      "equation_or_algorithm": "An = min(Ac, Aj, Ap) - Rd",
+      "inputs": [{"name": "PPFD", "unit": "umol m^-2 s^-1"}, {"name": "Ci", "unit": "umol mol^-1"}, {"name": "leaf_temperature", "unit": "degC"}],
+      "outputs": [{"name": "net_assimilation", "unit": "umol m^-2 s^-1"}],
+      "units": ["umol m^-2 s^-1", "umol mol^-1", "degC"],
+      "source_title": "A biochemical model of photosynthetic CO2 assimilation in leaves of C3 species",
+      "authors": ["Farquhar, G.D.", "von Caemmerer, S.", "Berry, J.A."],
+      "publication_or_organization": "Planta (1980)",
+      "doi_or_stable_identifier": "10.1007/BF00386231",
+      "valid_domain": "Valid leaf temperature; supplied biochemical parameters",
+      "assumptions": ["Mesophyll conductance is assumed infinite (Ci = Cc).", "Steady-state responses."],
+      "approximation_status": "mechanistic model of carbon assimilation",
+      "calibration_status": "requires_explicit_profile",
+      "implementation_location": "Simulation/GasExchange/GasExchange.cpp:solve_coupled_gas_exchange",
+      "validation_tests": ["test_gas_exchange"],
+      "notes": ["Calibration parameters must be explicitly supplied."]
+    },
+    {
+      "model_id": "plants.gas_exchange.medlyn",
+      "version": "1.0.0",
+      "purpose": "Calculate stomatal conductance based on net assimilation and VPD.",
+      "equation_or_algorithm": "g_sw = g0 + 1.6 * (1 + g1 / sqrt(D)) * An / Ca",
+      "inputs": [{"name": "net_assimilation", "unit": "umol m^-2 s^-1"}, {"name": "VPD", "unit": "kPa"}, {"name": "Ca", "unit": "umol mol^-1"}],
+      "outputs": [{"name": "stomatal_conductance", "unit": "mol m^-2 s^-1"}],
+      "units": ["mol m^-2 s^-1", "kPa", "umol mol^-1", "umol m^-2 s^-1"],
+      "source_title": "Reconciling the optimal and empirical approaches to modelling stomatal conductance",
+      "authors": ["Medlyn, B.E.", "et al."],
+      "publication_or_organization": "Global Change Biology (2011)",
+      "doi_or_stable_identifier": "10.1111/j.1365-2486.2010.02375.x",
+      "valid_domain": "Positive assimilation (or clamps to g0), positive VPD.",
+      "assumptions": ["Stomatal conductance to CO2 is g_sw / 1.6.", "Boundary layer conductance is assumed infinite (Ca = Cs)."],
+      "approximation_status": "semi-mechanistic optimization model",
+      "calibration_status": "requires_explicit_profile",
+      "implementation_location": "Simulation/GasExchange/GasExchange.cpp:solve_coupled_gas_exchange",
+      "validation_tests": ["test_gas_exchange"],
+      "notes": ["Calculates stomatal conductance to water vapor, converted to CO2 conductance internally for coupling."]
+    },
+    {
+      "model_id": "plants.gas_exchange.coupled_solver",
+      "version": "1.0.0",
+      "purpose": "Solve internal CO2 iteratively using FvCB and Medlyn models.",
+      "equation_or_algorithm": "Iterative damping over Ci",
+      "inputs": [{"name": "initial_guess_Ci", "unit": "umol mol^-1"}],
+      "outputs": [{"name": "Ci", "unit": "umol mol^-1"}, {"name": "convergence_status", "unit": "enum"}],
+      "units": ["umol mol^-1"],
+      "source_title": "CannaVille Engine Internal",
+      "authors": ["CannaVille Development Team"],
+      "publication_or_organization": "CannaVille",
+      "doi_or_stable_identifier": "internal",
+      "valid_domain": "100 max iterations, 1e-4 convergence tolerance",
+      "assumptions": ["Damped successive substitution provides stable convergence for Ci."],
+      "approximation_status": "numerical solver",
+      "calibration_status": "not_applicable",
+      "implementation_location": "Simulation/GasExchange/GasExchange.cpp:solve_coupled_gas_exchange",
+      "validation_tests": ["test_gas_exchange"],
+      "notes": ["Fails explicitly if convergence is not reached; no silent fallbacks."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_vegetative",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for high-capacity vegetative state.",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived. See P1B_Water_Relations.md for Ci/Cc mismatch with Tang 2017."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_high_capacity",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for elevated capacity.",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived."]
+    },
+    {
+      "model_id": "plants.gas_exchange.profiles.synthetic_flowering",
+      "version": "1.0.0",
+      "purpose": "Provide a software-testing profile for lower capacity (flowering proxy).",
+      "calibration_status": "SYNTHETIC_TEST_VALUE",
+      "notes": ["Not literature-derived."]
+    }
+  ]
+}

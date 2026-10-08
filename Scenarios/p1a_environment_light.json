@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "scenario_id": "p1a-environment-light",
+  "simulation_version": "0.2.0-p1a",
+  "fixed_timestep_seconds": 900,
+  "rooms": [
+    {
+      "id": "room-a",
+      "width_m": 2,
+      "depth_m": 1,
+      "cell_size_m": 1,
+      "cells": [
+        {
+          "id": "cell-a",
+          "center_x_m": 0.5,
+          "center_y_m": 0.5,
+          "environment": {
+            "air_temperature_c": 25,
+            "relative_humidity_percent": 50,
+            "atmospheric_pressure_kpa": 101.325,
+            "co2_umol_per_mol": 450,
+            "leaf_temperature_c": null
+          },
+          "lighting_schedule": [
+            {"start_seconds": 0, "end_seconds": 21600, "ppfd_umol_per_m2_s": 100},
+            {"start_seconds": 21600, "end_seconds": 43200, "ppfd_umol_per_m2_s": 200}
+          ]
+        },
+        {
+          "id": "cell-b",
+          "center_x_m": 1.5,
+          "center_y_m": 0.5,
+          "environment": {
+            "air_temperature_c": 20,
+            "relative_humidity_percent": 50,
+            "atmospheric_pressure_kpa": 100,
+            "co2_umol_per_mol": 800,
+            "leaf_temperature_c": 22
+          },
+          "lighting_schedule": [
+            {"start_seconds": 0, "end_seconds": 43200, "ppfd_umol_per_m2_s": 100}
+          ]
+        }
+      ]
+    }
+  ],
+  "plants": []
+}

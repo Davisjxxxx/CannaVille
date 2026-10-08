@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Simulation/Core/Units.hpp"
+#include "Simulation/Environment/EnvironmentState.hpp"
+#include "Simulation/Lighting/LightingState.hpp"
 
 #include <cstdint>
 #include <string>
@@ -9,11 +11,20 @@
 
 namespace cannaville::core {
 
+struct ScenarioCellDefinition {
+    std::string id;
+    units::Meters center_x;
+    units::Meters center_y;
+    environment::EnvironmentState environment;
+    lighting::LightingSchedule lighting_schedule;
+};
+
 struct ScenarioRoomDefinition {
     std::string id;
     units::Meters width;
     units::Meters depth;
     units::Meters cell_size;
+    std::vector<ScenarioCellDefinition> cells;
 };
 
 struct ScenarioPlantDefinition {

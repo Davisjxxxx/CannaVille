@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaville.invalid/schema/model-registry-document-v1.json",
+  "title": "CannaVille model registry document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["registry_version", "entries"],
+  "properties": {
+    "registry_version": {"type": "integer", "const": 1},
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "model_registry.schema.json"}
+    }
+  }
+}

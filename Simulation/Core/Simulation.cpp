@@ -2,6 +2,7 @@
 
 #include "Simulation/Core/DeterministicRng.hpp"
 #include "Simulation/Core/Serialization.hpp"
+#include "Simulation/Lighting/LightingSystem.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,20 @@ std::size_t cell_index_for(const RoomState& room, units::Meters x, units::Meters
     const std::size_t y_count = static_cast<std::size_t>(std::ceil(room.depth.value / room.cell_size.value));
     const auto raw_x = static_cast<std::size_t>(std::floor(std::max(0.0, x.value) / room.cell_size.value));
     const auto raw_y = static_cast<std::size_t>(std::floor(std::max(0.0, y.value) / room.cell_size.value));
+    if (room.uses_explicit_cells || room.cells.size() != x_count * y_count) {
+        std::size_t best_index = 0;
+        double best_distance = std::numeric_limits<double>::max();
+        for (std::size_t index = 0; index < room.cells.size(); ++index) {
+            const double dx = room.cells[index].center_x.value - x.value;
+            const double dy = room.cells[index].center_y.value - y.value;
+            const double distance = (dx * dx) + (dy * dy);
+            if (distance < best_distance) {
+                best_distance = distance;
+                best_index = index;
+            }
+        }
+        return best_index;
+    }
     const std::size_t cell_x = clamp_index(raw_x, x_count);
     const std::size_t cell_y = clamp_index(raw_y, y_count);
     return cell_y * x_count + cell_x;
@@ -59,16 +74,31 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
         room.width = definition.width;
         room.depth = definition.depth;
         room.cell_size = definition.cell_size;
+        room.uses_explicit_cells = !definition.cells.empty();
         const std::size_t x_count = static_cast<std::size_t>(std::ceil(room.width.value / room.cell_size.value));
         const std::size_t y_count = static_cast<std::size_t>(std::ceil(room.depth.value / room.cell_size.value));
         room.cells.reserve(x_count * y_count);
-        for (std::size_t y = 0; y < y_count; ++y) {
-            for (std::size_t x = 0; x < x_count; ++x) {
+        if (!definition.cells.empty()) {
+            for (const ScenarioCellDefinition& definition_cell : definition.cells) {
                 RoomCellState cell;
-                cell.id = room.id + "/cell-" + std::to_string(x) + "-" + std::to_string(y);
-                cell.center_x.value = (static_cast<double>(x) + 0.5) * room.cell_size.value;
-                cell.center_y.value = (static_cast<double>(y) + 0.5) * room.cell_size.value;
+                cell.id = definition_cell.id;
+                cell.center_x = definition_cell.center_x;
+                cell.center_y = definition_cell.center_y;
+                cell.environment = definition_cell.environment;
+                cell.lighting_schedule = definition_cell.lighting_schedule;
+                lighting::initialize_state(cell.lighting, cell.lighting_schedule, 0.0);
                 room.cells.push_back(std::move(cell));
+            }
+        } else {
+            for (std::size_t y = 0; y < y_count; ++y) {
+                for (std::size_t x = 0; x < x_count; ++x) {
+                    RoomCellState cell;
+                    cell.id = room.id + "/cell-" + std::to_string(x) + "-" + std::to_string(y);
+                    cell.center_x.value = (static_cast<double>(x) + 0.5) * room.cell_size.value;
+                    cell.center_y.value = (static_cast<double>(y) + 0.5) * room.cell_size.value;
+                    lighting::initialize_state(cell.lighting, cell.lighting_schedule, 0.0);
+                    room.cells.push_back(std::move(cell));
+                }
             }
         }
         state_.rooms.push_back(std::move(room));
@@ -106,6 +136,12 @@ void Simulation::advance_fixed_step() {
     const double timestep = state_.config.fixed_timestep.value;
     if (!(timestep > 0.0) || !std::isfinite(timestep)) {
         throw std::logic_error("simulation has no valid fixed timestep");
+    }
+    const double start_seconds = state_.clock.elapsed.value;
+    for (RoomState& room : state_.rooms) {
+        for (RoomCellState& cell : room.cells) {
+            lighting::advance_state(cell.lighting, cell.lighting_schedule, start_seconds, timestep);
+        }
     }
     state_.clock.elapsed.value += timestep;
     ++state_.clock.steps.value;
@@ -169,7 +205,17 @@ void Simulation::load_serialized_state(std::string_view serialized) {
     scenario_.simulation_version = state_.config.simulation_version;
     scenario_.fixed_timestep = state_.config.fixed_timestep;
     for (const RoomState& room : state_.rooms) {
-        scenario_.rooms.push_back(ScenarioRoomDefinition{room.id, room.width, room.depth, room.cell_size});
+        ScenarioRoomDefinition scenario_room{room.id, room.width, room.depth, room.cell_size, {}};
+        for (const RoomCellState& cell : room.cells) {
+            scenario_room.cells.push_back(ScenarioCellDefinition{
+                cell.id,
+                cell.center_x,
+                cell.center_y,
+                cell.environment,
+                cell.lighting_schedule,
+            });
+        }
+        scenario_.rooms.push_back(std::move(scenario_room));
     }
     for (const plants::PlantState& plant : state_.plants) {
         scenario_.plants.push_back(ScenarioPlantDefinition{
@@ -197,16 +243,47 @@ std::uint64_t Simulation::seed() const {
 }
 
 std::string Simulation::csv_header() const {
-    return "simulation_version,scenario_id,seed,step_index,elapsed_seconds,room_count,plant_count\n";
+    return "simulation_version,scenario_id,seed,step_index,simulation_timestamp_seconds,room_id,cell_id,"
+           "air_temperature_c,relative_humidity_percent,saturation_vapor_pressure_kpa,"
+           "actual_vapor_pressure_kpa,air_vpd_kpa,leaf_temperature_c,leaf_vpd_kpa,"
+           "ppfd_umol_per_m2_s,dli_mol_per_m2_day,accumulated_light_on_duration_s,"
+           "accumulated_dark_duration_s,co2_umol_per_mol\n";
 }
 
 std::string Simulation::csv_row() const {
-    return state_.config.simulation_version + "," + state_.scenario_id + "," +
-        std::to_string(state_.stochastic.seed) + "," +
-        std::to_string(state_.clock.steps.value) + "," +
-        std::to_string(state_.clock.elapsed.value) + "," +
-        std::to_string(state_.rooms.size()) + "," +
-        std::to_string(state_.plants.size()) + "\n";
+    std::string output;
+    for (const RoomState& room : state_.rooms) {
+        for (const RoomCellState& cell : room.cells) {
+            const auto optional_field = [](const std::optional<double>& value) {
+                return value.has_value() ? std::to_string(*value) : std::string{};
+            };
+            const std::optional<double> leaf_temperature = cell.environment.leaf_temperature.has_value()
+                ? std::optional<double>(cell.environment.leaf_temperature->value)
+                : std::nullopt;
+            const std::optional<double> leaf_vpd = cell.environment.leaf_vpd.has_value()
+                ? std::optional<double>(cell.environment.leaf_vpd->value)
+                : std::nullopt;
+            const std::string derived = cell.environment.physics_available
+                ? std::to_string(cell.environment.saturation_vapor_pressure.value) + "," +
+                    std::to_string(cell.environment.actual_vapor_pressure.value) + "," +
+                    std::to_string(cell.environment.air_vpd.value)
+                : ",,";
+            output += state_.config.simulation_version + "," + state_.scenario_id + "," +
+                std::to_string(state_.stochastic.seed) + "," +
+                std::to_string(state_.clock.steps.value) + "," +
+                std::to_string(state_.clock.elapsed.value) + "," +
+                room.id + "," + cell.id + "," +
+                std::to_string(cell.environment.air_temperature.value) + "," +
+                std::to_string(cell.environment.relative_humidity.value) + "," +
+                derived + "," + optional_field(leaf_temperature) + "," + optional_field(leaf_vpd) + "," +
+                std::to_string(cell.lighting.ppfd.value) + "," +
+                std::to_string(cell.lighting.dli.value) + "," +
+                std::to_string(cell.lighting.accumulated_light_on_duration.value) + "," +
+                std::to_string(cell.lighting.accumulated_dark_duration.value) + "," +
+                std::to_string(cell.environment.carbon_dioxide.value) + "\n";
+        }
+    }
+    return output;
 }
 
 } // namespace cannaville::core

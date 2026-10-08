@@ -21,6 +21,7 @@ struct RoomCellState {
     units::Meters center_x;
     units::Meters center_y;
     environment::EnvironmentState environment;
+    lighting::LightingSchedule lighting_schedule;
     lighting::LightingState lighting;
 };
 
@@ -29,6 +30,7 @@ struct RoomState {
     units::Meters width;
     units::Meters depth;
     units::Meters cell_size;
+    bool uses_explicit_cells{false};
     std::vector<RoomCellState> cells;
 };
 
