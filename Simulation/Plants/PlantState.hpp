@@ -42,7 +42,8 @@ struct PlantLatentState {
     gasexchange::GasExchangeState gas_exchange;
     transpiration::TranspirationResult transpiration;
     transpiration::BoundaryLayerConductance boundary_layer;
-    double effective_leaf_area_m2{1.0};
+    std::optional<double> effective_leaf_area_m2;
+    std::optional<double> leaf_characteristic_dimension_m;
     double requested_water_mol{0.0};
     double realized_water_mol{0.0};
     double unmet_demand_mol{0.0};

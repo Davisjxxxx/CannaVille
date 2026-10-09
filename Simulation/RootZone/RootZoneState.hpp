@@ -18,6 +18,9 @@ struct RootZoneState {
     // Core parameters
     units::VolumeCubicMeters substrate_bulk_volume{};
     std::optional<units::VolumeCubicMeters> max_stored_water{};
+    std::optional<std::string> substrate_hydraulic_profile_id;
+    std::optional<std::string> hydraulic_stress_transfer_profile_id;
+    std::optional<bool> explicit_unrestricted_water_access;
     
     // Dynamic physical state
     units::VolumeCubicMeters current_water_volume{};

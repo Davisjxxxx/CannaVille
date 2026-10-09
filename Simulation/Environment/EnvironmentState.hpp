@@ -11,7 +11,7 @@ struct EnvironmentState {
     units::RelativeHumidityPercent relative_humidity{};
     units::AtmosphericPressureKPa atmospheric_pressure{};
     units::CO2MicromolesPerMole carbon_dioxide{};
-    units::AirflowMetersPerSecond airflow{};
+    std::optional<units::AirflowMetersPerSecond> airflow;
     units::Meters cell_height{};
     std::optional<units::Celsius> leaf_temperature;
 

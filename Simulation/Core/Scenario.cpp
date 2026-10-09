@@ -50,12 +50,20 @@ environment::EnvironmentState parse_environment(const json::Value& object) {
     state.relative_humidity.value = require_number(object, "relative_humidity_percent");
     state.atmospheric_pressure.value = require_number(object, "atmospheric_pressure_kpa");
     state.carbon_dioxide.value = require_number(object, "co2_umol_per_mol");
+    const json::Value* airflow = object.find("airflow_m_per_s");
+    if (airflow != nullptr && !airflow->is_null()) {
+        state.airflow = units::AirflowMetersPerSecond{airflow->as_number()};
+    }
     const json::Value* leaf_temperature = object.find("leaf_temperature_c");
     if (leaf_temperature != nullptr && !leaf_temperature->is_null()) {
         if (!leaf_temperature->is_number() || !std::isfinite(leaf_temperature->as_number())) {
             throw json::ParseError("leaf_temperature_c must be a finite number or null");
         }
         state.leaf_temperature = units::Celsius{leaf_temperature->as_number()};
+    }
+    const json::Value* air_velocity = object.find("air_velocity_m_s");
+    if (air_velocity != nullptr && !air_velocity->is_null()) {
+        state.airflow = units::AirflowMetersPerSecond{air_velocity->as_number()};
     }
     environment::derive_physical_state(state);
     return state;
@@ -133,6 +141,12 @@ Scenario Scenario::load_json(std::string_view json_text) {
                 rz.max_stored_water = units::VolumeCubicMeters{max_water->as_number()};
             }
             rz.initial_water_volume.value = require_number(rz_value, "initial_water_volume_m3");
+            const json::Value* sub_prof = rz_value.find("substrate_hydraulic_profile_id");
+            if (sub_prof != nullptr && sub_prof->is_string()) rz.substrate_hydraulic_profile_id = sub_prof->as_string();
+            const json::Value* stress_prof = rz_value.find("hydraulic_stress_transfer_profile_id");
+            if (stress_prof != nullptr && stress_prof->is_string()) rz.hydraulic_stress_transfer_profile_id = stress_prof->as_string();
+            const json::Value* unrestricted = rz_value.find("explicit_unrestricted_water_access");
+            if (unrestricted != nullptr && unrestricted->is_boolean()) rz.explicit_unrestricted_water_access = unrestricted->as_boolean();
             scenario.root_zones.push_back(std::move(rz));
         }
     }
@@ -157,6 +171,12 @@ Scenario Scenario::load_json(std::string_view json_text) {
         definition.x.value = require_number(plant, "x_m");
         definition.y.value = require_number(plant, "y_m");
         definition.z.value = require_number(plant, "z_m");
+        const json::Value* gep = plant.find("gas_exchange_profile_id");
+        if (gep) definition.gas_exchange_profile_id = gep->as_string();
+        const json::Value* etl = plant.find("effective_transpiring_leaf_area_m2");
+        if (etl) definition.effective_transpiring_leaf_area_m2 = etl->as_number();
+        const json::Value* lcd = plant.find("leaf_characteristic_dimension_m");
+        if (lcd) definition.leaf_characteristic_dimension_m = lcd->as_number();
         scenario.plants.push_back(std::move(definition));
     }
 
@@ -169,8 +189,26 @@ Scenario Scenario::load_json(std::string_view json_text) {
         }
         throw json::ParseError(message.str());
     }
+    const json::Value* water_events = root.find("water_events");
+    if (water_events != nullptr) {
+        if (!water_events->is_array()) throw json::ParseError("water_events must be an array");
+        for (const json::Value& ev_wrapper : water_events->as_array()) {
+            require_object(ev_wrapper, "water_event");
+            const json::Value& ev_val = ev_wrapper; // assuming no wrapper used originally, if require_object just checks if it's an object
+            // Let's actually check how require_object is implemented. It just checks if ev_val is an object!
+            ScenarioWaterEvent ev;
+            ev.id = require_string(ev_val, "id");
+            ev.timestamp.value = require_number(ev_val, "timestamp_s");
+            ev.root_zone_id = require_string(ev_val, "root_zone_id");
+            ev.type = require_string(ev_val, "type");
+            ev.amount.value = require_number(ev_val, "amount_m3");
+            scenario.water_events.push_back(std::move(ev));
+        }
+    }
+    
     return scenario;
 }
+
 
 std::vector<std::string> Scenario::validate() const {
     std::vector<std::string> errors;
@@ -272,7 +310,17 @@ std::vector<std::string> Scenario::validate() const {
             errors.push_back("plant " + plant.id + " z_m must not be negative");
         }
     }
+    for (const ScenarioWaterEvent& ev : water_events) {
+        if (ev.id.empty()) errors.push_back("water_event id must not be empty");
+        if (ev.timestamp.value < 0.0) errors.push_back("water_event timestamp cannot be negative");
+        if (root_zone_ids.find(ev.root_zone_id) == root_zone_ids.end()) errors.push_back("water_event references unknown root zone: " + ev.root_zone_id);
+        if (ev.type != "irrigation" && ev.type != "top_off" && ev.type != "external_return" && ev.type != "drainage" && ev.type != "discharge") {
+            errors.push_back("water_event type unsupported: " + ev.type);
+        }
+    }
+    
     return errors;
 }
+
 
 } // namespace cannaville::core

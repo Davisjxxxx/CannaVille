@@ -1,3 +1,4 @@
+#include <iostream>
 #include "Simulation/Core/Simulation.hpp"
 
 #include "Simulation/Core/DeterministicRng.hpp"
@@ -117,6 +118,9 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
         rz.substrate_bulk_volume = definition.substrate_bulk_volume;
         rz.max_stored_water = definition.max_stored_water;
         rz.current_water_volume = definition.initial_water_volume;
+        rz.substrate_hydraulic_profile_id = definition.substrate_hydraulic_profile_id;
+        rz.hydraulic_stress_transfer_profile_id = definition.hydraulic_stress_transfer_profile_id;
+        rz.explicit_unrestricted_water_access = definition.explicit_unrestricted_water_access;
         state_.root_zones.push_back(std::move(rz));
     }
 
@@ -131,6 +135,9 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
         plant.genetics.cultivar_id = definition.cultivar_id;
         plant.stochastic.stream_seed = seed;
         plant.stochastic.stream_state = seed;
+        if (definition.gas_exchange_profile_id) plant.latent.gas_exchange.profile_id = *definition.gas_exchange_profile_id;
+        if (definition.effective_transpiring_leaf_area_m2) plant.latent.effective_leaf_area_m2 = definition.effective_transpiring_leaf_area_m2;
+        if (definition.leaf_characteristic_dimension_m) plant.latent.leaf_characteristic_dimension_m = definition.leaf_characteristic_dimension_m;
         const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
             return room.id == plant.location.room_id;
         });
@@ -150,127 +157,246 @@ void Simulation::submit_player_action(const PlayerAction& /*action*/) {
 }
 
 void Simulation::advance_fixed_step() {
+    if (state_.rooms.empty()) {
+        state_.clock.elapsed.value += state_.config.fixed_timestep.value;
+        ++state_.clock.steps.value;
+        return;
+    }
+
+    const double step_start = state_.clock.elapsed.value;
     const double timestep = state_.config.fixed_timestep.value;
-    if (!(timestep > 0.0) || !std::isfinite(timestep)) {
-        throw std::logic_error("simulation has no valid fixed timestep");
-    }
-    const double start_seconds = state_.clock.elapsed.value;
-    for (RoomState& room : state_.rooms) {
-        for (RoomCellState& cell : room.cells) {
-            lighting::advance_state(cell.lighting, cell.lighting_schedule, start_seconds, timestep);
-        }
-    }
-    state_.clock.elapsed.value += timestep;
-    ++state_.clock.steps.value;
+    const double step_end = step_start + timestep;
 
-    std::unordered_map<std::string, std::optional<double>> root_zone_betas;
-    for (const rootzone::RootZoneState& rz : state_.root_zones) {
-        if (rz.type == rootzone::RootZoneType::Substrate) {
-            auto sub_prof = rootzone::get_synthetic_substrate_test_profile_a();
-            auto stress_prof = rootzone::get_synthetic_stress_test_profile();
-            double current_vwc = rz.substrate_bulk_volume.value > 0.0 ? rz.current_water_volume.value / rz.substrate_bulk_volume.value : 0.0;
-            auto hydraulic_state = rootzone::compute_substrate_hydraulic_limitation(current_vwc, sub_prof, stress_prof);
-            root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
-        } else {
-            bool has_sufficient_water = rz.current_water_volume.value > 0.0; 
-            auto hydraulic_state = rootzone::compute_dwc_hydraulic_limitation(has_sufficient_water, false, false);
-            root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
+    std::vector<double> boundaries;
+    boundaries.push_back(step_start);
+    boundaries.push_back(step_end);
+
+    for (const RoomState& room : state_.rooms) {
+        for (const RoomCellState& cell : room.cells) {
+            double start_of_day = std::fmod(step_start, 86400.0);
+            
+            for (const auto& segment : cell.lighting_schedule.segments) {
+                double b1 = step_start + (segment.start_of_day.value - start_of_day);
+                if (segment.start_of_day.value < start_of_day) b1 += 86400.0;
+                if (b1 > step_start && b1 < step_end) boundaries.push_back(b1);
+                
+                double b2 = step_start + (segment.end_of_day.value - start_of_day);
+                if (segment.end_of_day.value < start_of_day) b2 += 86400.0;
+                if (b2 > step_start && b2 < step_end) boundaries.push_back(b2);
+            }
         }
     }
 
-    std::unordered_map<std::string, std::vector<rootzone::TranspirationRequest>> requests_by_rz;
-    std::unordered_map<std::string, std::vector<plants::PlantState*>> plants_by_rz;
+    for (const auto& ev : scenario_.water_events) {
+        if (ev.timestamp.value >= step_start && ev.timestamp.value < step_end) {
+            boundaries.push_back(ev.timestamp.value);
+        }
+    }
+
+    std::sort(boundaries.begin(), boundaries.end());
+    boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
+
+    double current_time = step_start;
+
+    for (size_t b_idx = 1; b_idx < boundaries.size(); ++b_idx) {
+        double next_boundary = boundaries[b_idx];
+        double segment_duration = next_boundary - current_time;
+        if (segment_duration <= 0.0) continue;
+
+        for (const auto& ev : scenario_.water_events) {
+            if (std::abs(ev.timestamp.value - current_time) < 1e-9) {
+                for (auto& rz : state_.root_zones) {
+                    if (rz.id == ev.root_zone_id) {
+                        if (ev.type == "irrigation" || ev.type == "top_off") {
+                            rz.current_water_volume.value += ev.amount.value;
+                            if (rz.type == rootzone::RootZoneType::Substrate) {
+                                rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
+                                rz.current_water_volume = container.current_water();
+                                rz.cumulative_irrigation_top_off.value += ev.amount.value;
+                            } else {
+                                rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
+                                rz.current_water_volume = res.current_water();
+                                rz.cumulative_irrigation_top_off.value += ev.amount.value;
+                            }
+                        } else if (ev.type == "external_return") {
+                            rz.current_water_volume.value += ev.amount.value;
+                            rz.cumulative_external_return_flow.value += ev.amount.value;
+                        } else if (ev.type == "drainage" || ev.type == "discharge") {
+                            double actual = std::min(rz.current_water_volume.value, ev.amount.value);
+                            rz.current_water_volume.value -= actual;
+                            rz.cumulative_drainage_discharge.value += actual;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Lighting
+        for (RoomState& room : state_.rooms) {
+            for (RoomCellState& cell : room.cells) {
+                lighting::advance_state(cell.lighting, cell.lighting_schedule, current_time, segment_duration);
+            }
+        }
+
+        std::unordered_map<std::string, std::optional<double>> root_zone_betas;
+        for (rootzone::RootZoneState& rz : state_.root_zones) {
+            if (rz.type == rootzone::RootZoneType::Substrate) {
+                if (rz.substrate_hydraulic_profile_id.has_value() && rz.hydraulic_stress_transfer_profile_id.has_value()) {
+                    auto sub_prof = rootzone::get_missing_substrate_profile();
+                    if (*rz.substrate_hydraulic_profile_id == "synthetic_test_a") sub_prof = rootzone::get_synthetic_substrate_test_profile_a();
+                    else if (*rz.substrate_hydraulic_profile_id == "synthetic_test_b") sub_prof = rootzone::get_synthetic_substrate_test_profile_b();
+                    
+                    auto stress_prof = rootzone::get_missing_stress_profile();
+                    if (*rz.hydraulic_stress_transfer_profile_id == "synthetic_stress_test") stress_prof = rootzone::get_synthetic_stress_test_profile();
+
+                    if (sub_prof.is_valid() && stress_prof.is_valid()) {
+                        double current_vwc = rz.substrate_bulk_volume.value > 0.0 ? rz.current_water_volume.value / rz.substrate_bulk_volume.value : 0.0;
+                        auto hydraulic_state = rootzone::compute_substrate_hydraulic_limitation(current_vwc, sub_prof, stress_prof);
+                        root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
+                    }
+                }
+            } else {
+                bool has_sufficient_water = rz.current_water_volume.value > 0.0;
+                bool explicit_access = rz.explicit_unrestricted_water_access.value_or(false);
+                if (explicit_access) {
+                    auto hydraulic_state = rootzone::compute_dwc_hydraulic_limitation(has_sufficient_water, false, explicit_access);
+                    root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
+                }
+            }
+        }
+
+        std::unordered_map<std::string, std::vector<rootzone::TranspirationRequest>> requests_by_rz;
+        std::unordered_map<std::string, std::vector<plants::PlantState*>> plants_by_rz;
+
+        for (plants::PlantState& plant : state_.plants) {
+            const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
+                return room.id == plant.location.room_id;
+            });
+            if (room_it != state_.rooms.end()) sample_plant_from_room(plant, *room_it);
+
+            bool can_compute_physiology = true;
+            if (plant.latent.gas_exchange.profile_id.empty()) can_compute_physiology = false;
+            auto ge_profile = gasexchange::get_profile(plant.latent.gas_exchange.profile_id);
+            if (!ge_profile.is_configured) can_compute_physiology = false;
+
+            std::optional<double> beta = std::nullopt;
+            if (root_zone_betas.count(plant.root_zone_id)) {
+                beta = root_zone_betas[plant.root_zone_id];
+            }
+            if (!beta.has_value()) can_compute_physiology = false;
+
+            if (!plant.sampled_environment.physics_available) can_compute_physiology = false;
+            if (!plant.sampled_environment.leaf_temperature.has_value()) can_compute_physiology = false;
+            if (!plant.sampled_environment.leaf_vpd.has_value()) can_compute_physiology = false;
+            if (!plant.sampled_environment.airflow.has_value()) can_compute_physiology = false;
+            if (!plant.latent.effective_leaf_area_m2.has_value()) can_compute_physiology = false;
+            if (!plant.latent.leaf_characteristic_dimension_m.has_value()) can_compute_physiology = false;
+
+
+            if (can_compute_physiology) {
+                units::PPFDMicromolesPerSquareMeterSecond ppfd = plant.sampled_lighting.ppfd;
+                units::CO2MicromolesPerMole ambient_co2 = plant.sampled_environment.carbon_dioxide;
+                units::VPDKPa vpd = *plant.sampled_environment.leaf_vpd;
+
+                gasexchange::solve_coupled_gas_exchange(
+                    plant.latent.gas_exchange,
+                    ge_profile,
+                    ppfd,
+                    ambient_co2,
+                    vpd,
+                    plant.sampled_environment.leaf_temperature,
+                    plant.sampled_environment.atmospheric_pressure,
+                    beta
+                );
+
+                if (plant.latent.gas_exchange.status == gasexchange::ConvergenceStatus::Converged) {
+                    auto air_props = transpiration::calculate_air_properties(
+                        plant.sampled_environment.air_temperature,
+                        plant.sampled_environment.atmospheric_pressure
+                    );
+                    
+                    plant.latent.boundary_layer = transpiration::calculate_boundary_layer_conductance(
+                        *plant.sampled_environment.airflow,
+                        units::Meters{*plant.latent.leaf_characteristic_dimension_m},
+                        air_props,
+                        *plant.sampled_environment.leaf_temperature,
+                        plant.sampled_environment.air_temperature
+                    );
+
+                    plant.latent.transpiration = transpiration::calculate_transpiration(
+                        units::StomatalConductanceMolesPerSquareMeterSecond{plant.latent.gas_exchange.stomatal_conductance.value},
+                        plant.latent.boundary_layer,
+                        vpd,
+                        plant.sampled_environment.atmospheric_pressure
+                    );
+
+                    double requested_mol = plant.latent.transpiration.flux_mol_m2_s * (*plant.latent.effective_leaf_area_m2) * segment_duration;
+                    plant.latent.requested_water_mol = requested_mol;
+
+                    rootzone::TranspirationRequest req;
+                    req.flux = units::WaterFluxMolesPerSquareMeterSecond{plant.latent.transpiration.flux_mol_m2_s};
+                    req.area = units::AreaSquareMeters{*plant.latent.effective_leaf_area_m2};
+                    requests_by_rz[plant.root_zone_id].push_back(req);
+                    plants_by_rz[plant.root_zone_id].push_back(&plant);
+                } else {
+                    plant.latent.transpiration.flux_mol_m2_s = 0.0;
+                    plant.latent.requested_water_mol = 0.0;
+                }
+            } else {
+                plant.latent.gas_exchange.status = gasexchange::ConvergenceStatus::MissingCalibrationProfile;
+                plant.latent.gas_exchange.net_assimilation.value = 0.0;
+                plant.latent.gas_exchange.stomatal_conductance.value = 0.0;
+                plant.latent.gas_exchange.intercellular_co2.value = 0.0;
+                plant.latent.transpiration.flux_mol_m2_s = 0.0;
+                plant.latent.requested_water_mol = 0.0;
+            }
+        }
+
+        for (rootzone::RootZoneState& rz : state_.root_zones) {
+            if (requests_by_rz.count(rz.id) == 0) continue;
+
+            auto& requests = requests_by_rz[rz.id];
+            auto& plants = plants_by_rz[rz.id];
+
+            std::vector<units::VolumeCubicMeters> realized_m3_list;
+
+            if (rz.type == rootzone::RootZoneType::Substrate) {
+                rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
+                realized_m3_list = container.withdraw_transpiration_shared(requests, units::Seconds{segment_duration});
+                rz.current_water_volume = container.current_water();
+                auto balance = container.get_last_balance();
+                rz.cumulative_realized_withdrawal.value += balance.plant_withdrawal_realized_m3;
+                rz.cumulative_unmet_demand.value += balance.plant_withdrawal_unmet_m3;
+                rz.volumetric_water_content = container.volumetric_water_content();
+                rz.storage_fraction = container.storage_fraction();
+            } else {
+                rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
+                realized_m3_list = res.withdraw_transpiration_shared(requests, units::Seconds{segment_duration});
+                rz.current_water_volume = res.current_water();
+                auto balance = res.get_last_balance();
+                rz.cumulative_realized_withdrawal.value += balance.plant_withdrawal_realized_m3;
+                rz.cumulative_unmet_demand.value += balance.plant_withdrawal_unmet_m3;
+                rz.storage_fraction = res.storage_fraction();
+            }
+
+            for (size_t i = 0; i < plants.size(); ++i) {
+                plants[i]->latent.realized_water_mol = rootzone::cubic_meters_water_to_moles(realized_m3_list[i].value);
+                plants[i]->latent.unmet_demand_mol = std::max(0.0, plants[i]->latent.requested_water_mol - plants[i]->latent.realized_water_mol);
+            }
+        }
+
+        current_time = next_boundary;
+    }
 
     for (plants::PlantState& plant : state_.plants) {
         plant.history.elapsed.value += timestep;
         ++plant.history.steps.value;
-        const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
-            return room.id == plant.location.room_id;
-        });
-        if (room_it != state_.rooms.end()) sample_plant_from_room(plant, *room_it);
-
-        auto ge_profile = gasexchange::get_profile(plant.latent.gas_exchange.profile_id);
-        if (!ge_profile.is_configured) ge_profile = gasexchange::get_synthetic_vegetative_test_profile();
-
-        std::optional<double> beta = std::nullopt;
-        if (root_zone_betas.count(plant.root_zone_id)) {
-            beta = root_zone_betas[plant.root_zone_id];
-        }
-
-        units::PPFDMicromolesPerSquareMeterSecond ppfd = plant.sampled_lighting.ppfd;
-        units::CO2MicromolesPerMole ambient_co2 = plant.sampled_environment.carbon_dioxide;
-        units::VPDKPa vpd = plant.sampled_environment.leaf_vpd.value_or(plant.sampled_environment.air_vpd);
-        std::optional<units::Celsius> leaf_temp = plant.sampled_environment.leaf_temperature;
-        units::AtmosphericPressureKPa pressure{101.325};
-
-        gasexchange::solve_coupled_gas_exchange(
-            plant.latent.gas_exchange, ge_profile, ppfd, ambient_co2, vpd, leaf_temp, pressure, beta
-        );
-
-        auto air_props = transpiration::calculate_air_properties(plant.sampled_environment.air_temperature, pressure);
-        plant.latent.boundary_layer = transpiration::calculate_boundary_layer_conductance(
-            units::AirflowMetersPerSecond{0.5},
-            units::Meters{0.1},
-            air_props,
-            leaf_temp.value_or(plant.sampled_environment.air_temperature),
-            plant.sampled_environment.air_temperature
-        );
-
-        plant.latent.transpiration = transpiration::calculate_transpiration(
-            plant.latent.gas_exchange.stomatal_conductance,
-            plant.latent.boundary_layer,
-            vpd,
-            pressure
-        );
-
-        plant.latent.effective_leaf_area_m2 = 1.0;
-
-        double requested_mol = plant.latent.transpiration.flux_mol_m2_s * plant.latent.effective_leaf_area_m2 * timestep;
-        plant.latent.requested_water_mol = requested_mol;
-
-        rootzone::TranspirationRequest req;
-        req.flux = units::WaterFluxMolesPerSquareMeterSecond{plant.latent.transpiration.flux_mol_m2_s};
-        req.area = units::AreaSquareMeters{plant.latent.effective_leaf_area_m2};
-        requests_by_rz[plant.root_zone_id].push_back(req);
-        plants_by_rz[plant.root_zone_id].push_back(&plant);
     }
-
-    for (rootzone::RootZoneState& rz : state_.root_zones) {
-        if (requests_by_rz.count(rz.id) == 0) continue;
-
-        auto& requests = requests_by_rz[rz.id];
-        auto& plants = plants_by_rz[rz.id];
-
-        std::vector<units::VolumeCubicMeters> realized_m3_list;
-
-        if (rz.type == rootzone::RootZoneType::Substrate) {
-            rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
-            realized_m3_list = container.withdraw_transpiration_shared(requests, units::Seconds{timestep});
-            rz.current_water_volume = container.current_water();
-            auto balance = container.get_last_balance();
-            rz.cumulative_realized_withdrawal.value += balance.plant_withdrawal_realized_m3;
-            rz.cumulative_unmet_demand.value += balance.plant_withdrawal_unmet_m3;
-            rz.volumetric_water_content = container.volumetric_water_content();
-            rz.storage_fraction = container.storage_fraction();
-        } else {
-            rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
-            realized_m3_list = res.withdraw_transpiration_shared(requests, units::Seconds{timestep});
-            rz.current_water_volume = res.current_water();
-            auto balance = res.get_last_balance();
-            rz.cumulative_realized_withdrawal.value += balance.plant_withdrawal_realized_m3;
-            rz.cumulative_unmet_demand.value += balance.plant_withdrawal_unmet_m3;
-            rz.storage_fraction = res.storage_fraction();
-        }
-
-        for (size_t i = 0; i < plants.size(); ++i) {
-            plants[i]->latent.realized_water_mol = rootzone::cubic_meters_water_to_moles(realized_m3_list[i].value);
-            plants[i]->latent.unmet_demand_mol = std::max(0.0, plants[i]->latent.requested_water_mol - plants[i]->latent.realized_water_mol);
-        }
-    }
-
+    
+    state_.clock.elapsed.value += timestep;
+    ++state_.clock.steps.value;
     state_.stochastic.rng_state = rng_.state();
 }
-
 OfflineReconciliation Simulation::reconcile_offline_elapsed(units::Seconds elapsed) {
     if (!std::isfinite(elapsed.value) || elapsed.value < 0.0) {
         throw std::invalid_argument("offline elapsed seconds must be finite and non-negative");
@@ -350,6 +476,9 @@ void Simulation::load_serialized_state(std::string_view serialized) {
             plant.location.x,
             plant.location.y,
             plant.location.z,
+            plant.latent.gas_exchange.profile_id,
+            plant.latent.effective_leaf_area_m2,
+            plant.latent.leaf_characteristic_dimension_m
         });
     }
     rng_.restore_state(state_.stochastic.seed, state_.stochastic.rng_state);

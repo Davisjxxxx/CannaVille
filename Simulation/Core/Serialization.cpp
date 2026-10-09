@@ -14,8 +14,18 @@ namespace {
 json::Value number(double value) { return json::Value(value); }
 json::Value string_value(const std::string& value) { return json::Value(value); }
 json::Value unsigned_value(std::uint64_t value) { return json::Value(std::to_string(value)); }
-json::Value optional_number(const std::optional<units::Celsius>& value) {
+template <typename T>
+json::Value optional_number(const std::optional<T>& value) {
     return value.has_value() ? number(value->value) : json::Value(nullptr);
+}
+json::Value optional_number(const std::optional<double>& value) {
+    return value.has_value() ? number(*value) : json::Value(nullptr);
+}
+json::Value optional_string(const std::optional<std::string>& value) {
+    return value.has_value() ? string_value(*value) : json::Value(nullptr);
+}
+json::Value optional_bool(const std::optional<bool>& value) {
+    return value.has_value() ? json::Value(*value) : json::Value(nullptr);
 }
 
 double number_field(const json::Value& object, std::string_view key) {
@@ -82,7 +92,7 @@ json::Value environment_json(const environment::EnvironmentState& value) {
         {"relative_humidity_percent", number(value.relative_humidity.value)},
         {"atmospheric_pressure_kpa", number(value.atmospheric_pressure.value)},
         {"co2_umol_per_mol", number(value.carbon_dioxide.value)},
-        {"airflow_m_per_s", number(value.airflow.value)},
+        {"airflow_m_per_s", optional_number(value.airflow)},
         {"cell_height_m", number(value.cell_height.value)},
         {"leaf_temperature_c", optional_number(value.leaf_temperature)},
         {"saturation_vapor_pressure_kpa", number(value.saturation_vapor_pressure.value)},
@@ -98,7 +108,12 @@ void read_environment(const json::Value& object, environment::EnvironmentState& 
     value.relative_humidity.value = number_field(object, "relative_humidity_percent");
     value.atmospheric_pressure.value = number_field(object, "atmospheric_pressure_kpa");
     value.carbon_dioxide.value = number_field(object, "co2_umol_per_mol");
-    value.airflow.value = number_field(object, "airflow_m_per_s");
+    const json::Value& airflow = object.require("airflow_m_per_s");
+    if (airflow.is_null()) {
+        value.airflow.reset();
+    } else {
+        value.airflow = units::AirflowMetersPerSecond{airflow.as_number()};
+    }
     value.cell_height.value = number_field(object, "cell_height_m");
     const json::Value& leaf_temperature = object.require("leaf_temperature_c");
     if (leaf_temperature.is_null()) {
@@ -305,7 +320,8 @@ json::Value plant_json(const plants::PlantState& plant) {
                 {"leaf_air_vapor_gradient_mol_mol", number(plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol)},
                 {"status", string_value(plant.latent.transpiration.status)}
             })},
-            {"effective_leaf_area_m2", number(plant.latent.effective_leaf_area_m2)},
+            {"effective_leaf_area_m2", optional_number(plant.latent.effective_leaf_area_m2)},
+            {"leaf_characteristic_dimension_m", optional_number(plant.latent.leaf_characteristic_dimension_m)},
             {"requested_water_mol", number(plant.latent.requested_water_mol)},
             {"realized_water_mol", number(plant.latent.realized_water_mol)},
             {"unmet_demand_mol", number(plant.latent.unmet_demand_mol)}
@@ -404,7 +420,9 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     }
     if (latent.is_object()) {
         const auto* el = latent.find("effective_leaf_area_m2");
-        if (el) plant.latent.effective_leaf_area_m2 = el->as_number();
+        if (el && !el->is_null()) plant.latent.effective_leaf_area_m2 = el->as_number();
+        const auto* lcd = latent.find("leaf_characteristic_dimension_m");
+        if (lcd && !lcd->is_null()) plant.latent.leaf_characteristic_dimension_m = lcd->as_number();
         const auto* rq = latent.find("requested_water_mol");
         if (rq) plant.latent.requested_water_mol = rq->as_number();
         const auto* rl = latent.find("realized_water_mol");
