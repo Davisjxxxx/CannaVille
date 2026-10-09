@@ -75,7 +75,7 @@ struct GasExchangeState {
     units::StomatalConductanceMolesPerSquareMeterSecond stomatal_conductance{0.0};
     double g1_reference{0.0};
     double g1_effective{0.0};
-    double beta_hydraulic{1.0};
+    std::optional<double> beta_hydraulic;
     ConvergenceStatus status{ConvergenceStatus::NotRun};
     std::string profile_id;
 };
@@ -101,7 +101,7 @@ void solve_coupled_gas_exchange(
     units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
     units::AtmosphericPressureKPa pressure,
-    double beta_hydraulic = 1.0
+    std::optional<double> beta_hydraulic = std::nullopt
 );
 
 } // namespace cannaville::gasexchange

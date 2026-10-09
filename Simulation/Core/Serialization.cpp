@@ -256,7 +256,7 @@ json::Value plant_json(const plants::PlantState& plant) {
         })},
         {"sampled_environment", environment_json(plant.sampled_environment)},
         {"sampled_lighting", lighting_json(plant.sampled_lighting)},
-        {"root_zone", root_zone_json(plant.root_zone)},
+        {"root_zone_id", string_value(plant.root_zone_id)},
         {"nutrition", json::Value({
             {"solution_profile_id", string_value(plant.nutrition.solution_profile_id)},
             {"availability_model_initialized", json::Value(plant.nutrition.availability_model_initialized)},
@@ -298,7 +298,17 @@ json::Value plant_json(const plants::PlantState& plant) {
                 {"stomatal_conductance", number(plant.latent.gas_exchange.stomatal_conductance.value)},
                 {"status", number(static_cast<double>(plant.latent.gas_exchange.status))},
                 {"profile_id", string_value(plant.latent.gas_exchange.profile_id)}
-            })}
+            })},
+            {"transpiration", json::Value({
+                {"flux_mol_m2_s", number(plant.latent.transpiration.flux_mol_m2_s)},
+                {"total_conductance_mol_m2_s", number(plant.latent.transpiration.total_conductance_mol_m2_s)},
+                {"leaf_air_vapor_gradient_mol_mol", number(plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol)},
+                {"status", string_value(plant.latent.transpiration.status)}
+            })},
+            {"effective_leaf_area_m2", number(plant.latent.effective_leaf_area_m2)},
+            {"requested_water_mol", number(plant.latent.requested_water_mol)},
+            {"realized_water_mol", number(plant.latent.realized_water_mol)},
+            {"unmet_demand_mol", number(plant.latent.unmet_demand_mol)}
         })},
         {"observable", json::Value({
             {"displayed_growth_stage", string_value(stage_to_string(plant.observable.displayed_growth_stage))},
@@ -333,7 +343,19 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     plant.genetics.inheritance_model_initialized = bool_field(genetics, "inheritance_model_initialized");
     read_environment(object.require("sampled_environment"), plant.sampled_environment);
     read_lighting(object.require("sampled_lighting"), plant.sampled_lighting);
-    read_root_zone(object.require("root_zone"), plant.root_zone);
+    
+    const json::Value* rz = object.find("root_zone_id");
+    if (rz != nullptr && rz->is_string()) {
+        plant.root_zone_id = rz->as_string();
+    } else {
+        // Fallback for legacy format that embedded root_zone objects in plants
+        const json::Value* rz_obj = object.find("root_zone");
+        if (rz_obj != nullptr && rz_obj->is_object()) {
+            plant.root_zone_id = string_field(*rz_obj, "id");
+        } else {
+            plant.root_zone_id = "rootzone_" + plant.id;
+        }
+    }
 
     const auto& nutrition = object.require("nutrition");
     plant.nutrition.solution_profile_id = string_field(nutrition, "solution_profile_id");
@@ -371,6 +393,24 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
         plant.latent.gas_exchange.stomatal_conductance.value = number_field(ge, "stomatal_conductance");
         plant.latent.gas_exchange.status = static_cast<gasexchange::ConvergenceStatus>(number_field(ge, "status"));
         plant.latent.gas_exchange.profile_id = string_field(ge, "profile_id");
+    }
+    const auto* trans_ptr = latent.is_object() ? latent.find("transpiration") : nullptr;
+    if (trans_ptr) {
+        const auto& trans = *trans_ptr;
+        plant.latent.transpiration.flux_mol_m2_s = number_field(trans, "flux_mol_m2_s");
+        plant.latent.transpiration.total_conductance_mol_m2_s = number_field(trans, "total_conductance_mol_m2_s");
+        plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol = number_field(trans, "leaf_air_vapor_gradient_mol_mol");
+        plant.latent.transpiration.status = string_field(trans, "status");
+    }
+    if (latent.is_object()) {
+        const auto* el = latent.find("effective_leaf_area_m2");
+        if (el) plant.latent.effective_leaf_area_m2 = el->as_number();
+        const auto* rq = latent.find("requested_water_mol");
+        if (rq) plant.latent.requested_water_mol = rq->as_number();
+        const auto* rl = latent.find("realized_water_mol");
+        if (rl) plant.latent.realized_water_mol = rl->as_number();
+        const auto* ud = latent.find("unmet_demand_mol");
+        if (ud) plant.latent.unmet_demand_mol = ud->as_number();
     }
     const auto& observable = object.require("observable");
     plant.observable.displayed_growth_stage = stage_from_string(string_field(observable, "displayed_growth_stage"));
@@ -438,6 +478,8 @@ void read_room(const json::Value& object, RoomState& room) {
 std::string serialize_state_json(const SimulationState& state) {
     json::Value::Array rooms;
     for (const RoomState& room : state.rooms) rooms.push_back(room_json(room));
+    json::Value::Array root_zones;
+    for (const cannaville::rootzone::RootZoneState& rz : state.root_zones) root_zones.push_back(root_zone_json(rz));
     json::Value::Array plant_values;
     for (const cannaville::plants::PlantState& plant : state.plants) plant_values.push_back(plant_json(plant));
 
@@ -458,6 +500,7 @@ std::string serialize_state_json(const SimulationState& state) {
             {"draws_consumed", unsigned_value(state.stochastic.draws_consumed)},
         })},
         {"rooms", json::Value(std::move(rooms))},
+        {"root_zones", json::Value(std::move(root_zones))},
         {"plants", json::Value(std::move(plant_values))},
     }));
 }
@@ -486,6 +529,15 @@ SimulationState deserialize_state_json(const std::string& serialized) {
         RoomState room;
         read_room(value, room);
         state.rooms.push_back(std::move(room));
+    }
+    const json::Value* root_zones = root.find("root_zones");
+    if (root_zones != nullptr) {
+        if (!root_zones->is_array()) throw json::ParseError("serialized root_zones must be an array");
+        for (const auto& value : root_zones->as_array()) {
+            cannaville::rootzone::RootZoneState rz;
+            read_root_zone(value, rz);
+            state.root_zones.push_back(std::move(rz));
+        }
     }
     const auto& plants = root.require("plants");
     if (!plants.is_array()) throw json::ParseError("serialized plants must be an array");

@@ -104,19 +104,26 @@ int main(int argc, char** argv) {
         std::ofstream output(arguments.output_path, std::ios::trunc);
         if (!output) throw std::runtime_error("unable to open output: " + arguments.output_path);
         std::ofstream rz_output(arguments.output_path + ".rootzone.csv", std::ios::trunc);
+        std::ofstream phys_output(arguments.output_path + ".physiology.csv", std::ios::trunc);
         output << simulation.csv_header();
         output << simulation.csv_row();
         if (rz_output) {
             rz_output << simulation.root_zone_csv_header();
             rz_output << simulation.root_zone_csv_row();
         }
+        if (phys_output) {
+            phys_output << simulation.plant_physiology_csv_header();
+            phys_output << simulation.plant_physiology_csv_row();
+        }
         for (std::uint64_t step = 0; step < step_count; ++step) {
             simulation.advance_fixed_step();
             output << simulation.csv_row();
             if (rz_output) rz_output << simulation.root_zone_csv_row();
+            if (phys_output) phys_output << simulation.plant_physiology_csv_row();
         }
         output.close();
         if (rz_output) rz_output.close();
+        if (phys_output) phys_output.close();
 
         const auto observable = simulation.observable_state();
         std::cout << "simulation_version=" << observable.simulation_version << '\n'

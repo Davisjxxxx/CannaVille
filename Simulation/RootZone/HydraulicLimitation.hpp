@@ -82,14 +82,14 @@ struct HydraulicState {
     double effective_saturation{1.0};
     double matric_pressure_head_meters{0.0};
     double matric_potential_mpa{0.0};
-    double beta_hydraulic{1.0};
+    std::optional<double> beta_hydraulic;
     HydraulicStatus status{HydraulicStatus::Valid};
 };
 
 struct EffectiveMedlyn {
     double g1_reference{0.0};
     double g1_effective{0.0};
-    double beta_hydraulic{1.0};
+    std::optional<double> beta_hydraulic;
 };
 
 void evaluate_van_genuchten(
@@ -118,7 +118,7 @@ HydraulicState compute_dwc_hydraulic_limitation(
 
 EffectiveMedlyn apply_hydraulic_limitation_to_medlyn(
     double g1_reference,
-    double beta_hydraulic
+    std::optional<double> beta_hydraulic
 );
 
 } // namespace cannaville::rootzone

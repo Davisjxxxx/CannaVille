@@ -77,12 +77,16 @@ void solve_coupled_gas_exchange(
     units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
     units::AtmosphericPressureKPa pressure,
-    double beta_hydraulic
+    std::optional<double> beta_hydraulic
 ) {
     state.profile_id = profile.id;
-    state.beta_hydraulic = std::clamp(beta_hydraulic, 0.0, 1.0);
+    if (beta_hydraulic.has_value()) {
+        state.beta_hydraulic = std::clamp(beta_hydraulic.value(), 0.0, 1.0);
+    } else {
+        state.beta_hydraulic = std::nullopt;
+    }
     state.g1_reference = profile.medlyn.g1;
-    state.g1_effective = state.g1_reference * state.beta_hydraulic;
+    state.g1_effective = state.g1_reference * state.beta_hydraulic.value_or(1.0);
 
     if (!profile.is_configured) {
         state.status = ConvergenceStatus::MissingCalibrationProfile;

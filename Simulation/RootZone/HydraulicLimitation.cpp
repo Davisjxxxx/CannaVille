@@ -170,29 +170,33 @@ HydraulicState compute_dwc_hydraulic_limitation(
     
     if (requires_geometry_for_access) {
         state.status = HydraulicStatus::HydraulicStateUnavailable;
-        state.beta_hydraulic = 1.0; 
+        state.beta_hydraulic = std::nullopt;
     } else if (!has_sufficient_water) {
         state.status = HydraulicStatus::InsufficientRootzoneWater;
-        state.beta_hydraulic = 0.0; // short explicitly
+        state.beta_hydraulic = std::nullopt;
     } else if (explicit_unrestricted_override) {
         state.status = HydraulicStatus::UnrestrictedWaterAccess;
         state.beta_hydraulic = 1.0;
     } else {
         state.status = HydraulicStatus::HydraulicStateUnavailable;
-        state.beta_hydraulic = 1.0;
+        state.beta_hydraulic = std::nullopt;
     }
     return state;
 }
 
 EffectiveMedlyn apply_hydraulic_limitation_to_medlyn(
     double g1_reference,
-    double beta_hydraulic
+    std::optional<double> beta_hydraulic
 ) {
     EffectiveMedlyn result;
     result.g1_reference = g1_reference;
-    // g1_effective = g1_reference * beta_hydraulic
-    result.beta_hydraulic = std::clamp(beta_hydraulic, 0.0, 1.0);
-    result.g1_effective = result.g1_reference * result.beta_hydraulic;
+    if (beta_hydraulic.has_value()) {
+        result.beta_hydraulic = std::clamp(beta_hydraulic.value(), 0.0, 1.0);
+        result.g1_effective = result.g1_reference * result.beta_hydraulic.value();
+    } else {
+        result.beta_hydraulic = std::nullopt;
+        result.g1_effective = result.g1_reference;
+    }
     return result;
 }
 

@@ -4,6 +4,7 @@
 #include "Simulation/Environment/EnvironmentState.hpp"
 #include "Simulation/Lighting/LightingState.hpp"
 #include "Simulation/Plants/PlantState.hpp"
+#include "Simulation/RootZone/RootZoneState.hpp"
 
 #include <cstdint>
 #include <string>
@@ -51,6 +52,7 @@ struct SimulationState {
     SimulationClock clock;
     SimulationStochasticState stochastic;
     std::vector<RoomState> rooms;
+    std::vector<rootzone::RootZoneState> root_zones;
     std::vector<plants::PlantState> plants;
 };
 

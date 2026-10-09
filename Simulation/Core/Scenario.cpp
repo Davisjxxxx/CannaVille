@@ -119,6 +119,24 @@ Scenario Scenario::load_json(std::string_view json_text) {
         scenario.rooms.push_back(std::move(definition));
     }
 
+    const json::Value* root_zones = root.find("root_zones");
+    if (root_zones != nullptr) {
+        if (!root_zones->is_array()) throw json::ParseError("root_zones must be an array");
+        for (const json::Value& rz_value : root_zones->as_array()) {
+            require_object(rz_value, "root_zone");
+            ScenarioRootZoneDefinition rz;
+            rz.id = require_string(rz_value, "id");
+            rz.type = require_string(rz_value, "type");
+            rz.substrate_bulk_volume.value = require_number(rz_value, "substrate_bulk_volume_m3");
+            const json::Value* max_water = rz_value.find("max_stored_water_m3");
+            if (max_water != nullptr) {
+                rz.max_stored_water = units::VolumeCubicMeters{max_water->as_number()};
+            }
+            rz.initial_water_volume.value = require_number(rz_value, "initial_water_volume_m3");
+            scenario.root_zones.push_back(std::move(rz));
+        }
+    }
+
     const json::Value& plants = root.require("plants");
     if (!plants.is_array()) {
         throw json::ParseError("plants must be an array");
@@ -130,6 +148,12 @@ Scenario Scenario::load_json(std::string_view json_text) {
         definition.id = require_string(plant, "id");
         definition.room_id = require_string(plant, "room_id");
         definition.cultivar_id = require_string(plant, "cultivar_id");
+        const json::Value* rzid = plant.find("root_zone_id");
+        if (rzid != nullptr) {
+            definition.root_zone_id = rzid->as_string();
+        } else {
+            definition.root_zone_id = "rootzone_" + definition.id; // Default fallback for backward compatibility
+        }
         definition.x.value = require_number(plant, "x_m");
         definition.y.value = require_number(plant, "y_m");
         definition.z.value = require_number(plant, "z_m");
@@ -204,6 +228,24 @@ std::vector<std::string> Scenario::validate() const {
         }
     }
 
+    std::set<std::string> root_zone_ids;
+    for (const ScenarioRootZoneDefinition& rz : root_zones) {
+        if (rz.id.empty()) errors.push_back("root_zone id must not be empty");
+        if (!root_zone_ids.insert(rz.id).second) errors.push_back("duplicate root_zone id: " + rz.id);
+        if (rz.type != "Substrate" && rz.type != "Reservoir") {
+            errors.push_back("root_zone " + rz.id + " type must be Substrate or Reservoir");
+        }
+        if (rz.substrate_bulk_volume.value <= 0.0) {
+            errors.push_back("root_zone " + rz.id + " substrate_bulk_volume_m3 must be positive");
+        }
+        if (rz.max_stored_water.has_value() && rz.max_stored_water->value < 0.0) {
+            errors.push_back("root_zone " + rz.id + " max_stored_water_m3 cannot be negative");
+        }
+        if (rz.initial_water_volume.value < 0.0) {
+            errors.push_back("root_zone " + rz.id + " initial_water_volume_m3 cannot be negative");
+        }
+    }
+
     std::set<std::string> plant_ids;
     for (const ScenarioPlantDefinition& plant : plants) {
         if (plant.id.empty()) errors.push_back("plant id must not be empty");
@@ -214,6 +256,11 @@ std::vector<std::string> Scenario::validate() const {
         if (room_it == rooms.end()) {
             errors.push_back("plant " + plant.id + " references unknown room: " + plant.room_id);
             continue;
+        }
+        if (!root_zones.empty()) {
+            if (root_zone_ids.find(plant.root_zone_id) == root_zone_ids.end()) {
+                errors.push_back("plant " + plant.id + " references unknown root_zone: " + plant.root_zone_id);
+            }
         }
         if (!std::isfinite(plant.x.value) || plant.x.value < 0.0 || plant.x.value > room_it->width.value) {
             errors.push_back("plant " + plant.id + " x_m is outside its room");

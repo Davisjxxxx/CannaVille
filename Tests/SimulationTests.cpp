@@ -23,8 +23,11 @@ const std::string smoke_json = R"json({
   "rooms": [
     {"id": "room-a", "width_m": 4, "depth_m": 4, "cell_size_m": 1}
   ],
+    "root_zones": [
+    {"id": "rootzone_plant-a", "type": "Substrate", "substrate_bulk_volume_m3": 0.01, "initial_water_volume_m3": 0.005}
+  ],
   "plants": [
-    {"id": "plant-a", "room_id": "room-a", "cultivar_id": "placeholder", "x_m": 0.5, "y_m": 0.5, "z_m": 0}
+    {"id": "plant-a", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rootzone_plant-a", "x_m": 0.5, "y_m": 0.5, "z_m": 0}
   ]
 })json";
 
@@ -846,13 +849,13 @@ void test_hydraulic_limitation() {
 
     // 14-17 DWC policy
     auto dwc = compute_dwc_hydraulic_limitation(true, false, true);
-    if (dwc.status != HydraulicStatus::UnrestrictedWaterAccess || dwc.beta_hydraulic != 1.0) throw std::runtime_error("dwc unrestricted fail");
+    if (dwc.status != HydraulicStatus::UnrestrictedWaterAccess || dwc.beta_hydraulic.value_or(0.0) != 1.0) throw std::runtime_error("dwc unrestricted fail");
     
     dwc = compute_dwc_hydraulic_limitation(false, false, true);
-    if (dwc.status != HydraulicStatus::InsufficientRootzoneWater || dwc.beta_hydraulic != 0.0) throw std::runtime_error("dwc shortage fail");
+    if (dwc.status != HydraulicStatus::InsufficientRootzoneWater || dwc.beta_hydraulic.has_value()) throw std::runtime_error("dwc shortage fail");
 
     dwc = compute_dwc_hydraulic_limitation(true, true, true);
-    if (dwc.status != HydraulicStatus::HydraulicStateUnavailable || dwc.beta_hydraulic != 1.0) throw std::runtime_error("dwc geometry fail");
+    if (dwc.status != HydraulicStatus::HydraulicStateUnavailable || dwc.beta_hydraulic.has_value()) throw std::runtime_error("dwc geometry fail");
 
     // Scenario A: two substrates identical VWC
     if (s.matric_potential_mpa == sb.matric_potential_mpa) throw std::runtime_error("scenario A fail");
@@ -887,6 +890,168 @@ void test_hydraulic_limitation() {
     }
 }
 
+void test_end_to_end_substrate() {
+    const std::string json = R"json({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 3600,
+      "rooms": [{"id": "room-a", "width_m": 1, "depth_m": 1, "cell_size_m": 1, "cells": [
+          {
+            "id": "cell-a", "center_x_m": 0.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          }
+        ]}],
+      "root_zones": [
+        {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009}
+      ],
+      "plants": [
+        {"id": "plant-1", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0}
+      ]
+    })json";
+    const auto scenario = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scenario, 42);
+    sim.advance_fixed_step();
+    auto state = sim.full_state_for_internal_use();
+    require(state.root_zones.size() == 1, "has root zone");
+    require(state.plants.front().latent.realized_water_mol > 0.0, "transpired water");
+    require(state.plants.front().latent.unmet_demand_mol >= 0.0, "valid unmet demand");
+}
+
+void test_end_to_end_shared_dwc() {
+    const std::string json = R"json({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 3600,
+      "rooms": [{"id": "room-a", "width_m": 2, "depth_m": 1, "cell_size_m": 1, "cells": [
+          {
+            "id": "cell-a", "center_x_m": 0.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          },
+          {
+            "id": "cell-b", "center_x_m": 1.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          }
+        ]}],
+      "root_zones": [
+        {"id": "rz1", "type": "Reservoir", "substrate_bulk_volume_m3": 0.1, "initial_water_volume_m3": 0.1, "max_stored_water_m3": 0.1}
+      ],
+      "plants": [
+        {"id": "plant-1", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0},
+        {"id": "plant-2", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz1", "x_m": 1.5, "y_m": 0.5, "z_m": 0}
+      ]
+    })json";
+    const auto scenario = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scenario, 42);
+    sim.advance_fixed_step();
+    auto state = sim.full_state_for_internal_use();
+    require(state.plants[0].latent.realized_water_mol > 0.0, "transpired water");
+     require(state.plants[1].latent.realized_water_mol > 0.0, "transpired water");
+}
+
+void test_end_to_end_two_substrate() {
+    const std::string json = R"json({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 3600,
+      "rooms": [{"id": "room-a", "width_m": 2, "depth_m": 1, "cell_size_m": 1, "cells": [
+          {
+            "id": "cell-a", "center_x_m": 0.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          },
+          {
+            "id": "cell-b", "center_x_m": 1.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          }
+        ]}],
+      "root_zones": [
+        {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009},
+        {"id": "rz2", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009}
+      ],
+      "plants": [
+        {"id": "plant-1", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0},
+        {"id": "plant-2", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz2", "x_m": 1.5, "y_m": 0.5, "z_m": 0}
+      ]
+    })json";
+    const auto scenario = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scenario, 42);
+    sim.advance_fixed_step();
+    auto state = sim.full_state_for_internal_use();
+    require(state.plants[0].latent.realized_water_mol > 0.0, "transpired water 1");
+    require(state.plants[1].latent.realized_water_mol > 0.0, "transpired water 2");
+}
+
+void test_end_to_end_determinism() {
+    const std::string json = R"json({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 3600,
+      "rooms": [{"id": "room-a", "width_m": 1, "depth_m": 1, "cell_size_m": 1, "cells": [
+          {
+            "id": "cell-a", "center_x_m": 0.5, "center_y_m": 0.5,
+            "environment": {
+              "air_temperature_c": 25, "relative_humidity_percent": 50,
+              "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 450,
+              "leaf_temperature_c": 25.0
+            },
+            "lighting_schedule": [
+              {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
+            ]
+          }
+        ]}],
+      "root_zones": [
+        {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009}
+      ],
+      "plants": [
+        {"id": "plant-1", "room_id": "room-a", "cultivar_id": "placeholder", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0}
+      ]
+    })json";
+    const auto scenario = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation first(scenario, 42);
+    cannaville::core::Simulation second(scenario, 42);
+    first.advance_fixed_step();
+    second.advance_fixed_step();
+    require(first.serialize_state() == second.serialize_state(), "determinism fail");
+}
+
 int main() {
     try {
         test_deterministic_repeated_runs();
@@ -913,7 +1078,12 @@ int main() {
         test_rootzone_robustness_sweep();
         test_rootzone_ledger_serialization();
     test_hydraulic_limitation();
+        test_end_to_end_substrate();
+        test_end_to_end_shared_dwc();
+        test_end_to_end_two_substrate();
+        test_end_to_end_determinism();
         std::cout << "PASS: deterministic repeated runs\n"
+
                   << "PASS: isolated seeds and explicit RNG streams\n"
                   << "PASS: fixed timestep and offline reconciliation\n"
                   << "PASS: serialization round-trip\n"

@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <string>
 
+#include "Simulation/Transpiration/Transpiration.hpp"
+
 namespace cannaville::plants {
 
 enum class GrowthStage {
@@ -38,6 +40,12 @@ struct PlantLocation {
 struct PlantLatentState {
     GrowthStage growth_stage{GrowthStage::Seedling};
     gasexchange::GasExchangeState gas_exchange;
+    transpiration::TranspirationResult transpiration;
+    transpiration::BoundaryLayerConductance boundary_layer;
+    double effective_leaf_area_m2{1.0};
+    double requested_water_mol{0.0};
+    double realized_water_mol{0.0};
+    double unmet_demand_mol{0.0};
 };
 
 struct PlantObservableState {
@@ -66,7 +74,7 @@ struct PlantState {
     genetics::GeneticsState genetics;
     environment::EnvironmentState sampled_environment;
     lighting::LightingState sampled_lighting;
-    rootzone::RootZoneState root_zone;
+    std::string root_zone_id;
     nutrition::NutritionState nutrition;
     pests::PestPopulationState pests;
     disease::DiseaseState disease;

@@ -27,10 +27,19 @@ struct ScenarioRoomDefinition {
     std::vector<ScenarioCellDefinition> cells;
 };
 
+struct ScenarioRootZoneDefinition {
+    std::string id;
+    std::string type; // "Substrate" or "Reservoir"
+    units::VolumeCubicMeters substrate_bulk_volume{};
+    std::optional<units::VolumeCubicMeters> max_stored_water;
+    units::VolumeCubicMeters initial_water_volume{};
+};
+
 struct ScenarioPlantDefinition {
     std::string id;
     std::string room_id;
     std::string cultivar_id;
+    std::string root_zone_id;
     units::Meters x;
     units::Meters y;
     units::Meters z;
@@ -42,6 +51,7 @@ struct Scenario {
     std::string simulation_version;
     units::Seconds fixed_timestep;
     std::vector<ScenarioRoomDefinition> rooms;
+    std::vector<ScenarioRootZoneDefinition> root_zones;
     std::vector<ScenarioPlantDefinition> plants;
 
     static Scenario load_json(std::string_view json_text);
