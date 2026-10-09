@@ -12,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -40,6 +41,28 @@ void require_near(double actual, double expected, double tolerance, const std::s
         throw std::runtime_error(message + ": actual=" + std::to_string(actual) +
                                  " expected=" + std::to_string(expected));
     }
+}
+
+std::vector<std::string> csv_fields(std::string line) {
+    if (!line.empty() && line.back() == '\n') line.pop_back();
+    std::vector<std::string> fields;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t delimiter = line.find(',', start);
+        if (delimiter == std::string::npos) {
+            fields.push_back(line.substr(start));
+            return fields;
+        }
+        fields.push_back(line.substr(start, delimiter - start));
+        start = delimiter + 1;
+    }
+}
+
+std::size_t csv_column(const std::vector<std::string>& header, const std::string& name) {
+    for (std::size_t index = 0; index < header.size(); ++index) {
+        if (header[index] == name) return index;
+    }
+    throw std::runtime_error("missing CSV column: " + name);
 }
 
 const std::string p1a_json = R"json({
@@ -527,6 +550,83 @@ void test_transpiration() {
     // 7. Zero Gradient
     auto trans_zero = calculate_transpiration(cannaville::units::StomatalConductanceMolesPerSquareMeterSecond{0.1}, gb_forced, cannaville::units::VPDKPa{0.0}, cannaville::units::AtmosphericPressureKPa{101.325});
     require_near(trans_zero.flux_mol_m2_s, 0.0, 1e-12, "Zero VPD should give zero flux");
+    require(trans.available, "Valid transpiration result must be marked available");
+    require(trans_zero.available, "A genuine calculated zero must remain available");
+}
+
+void test_unsupported_boundary_layer_integrated() {
+    const std::string json = R"json({
+      "schema_version": 1,
+      "scenario_id": "unsupported_boundary_layer",
+      "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 900,
+      "rooms": [{"id": "r", "width_m": 1, "depth_m": 1, "cell_size_m": 1, "cells": [{
+        "id": "c", "center_x_m": 0.5, "center_y_m": 0.5,
+        "environment": {"air_temperature_c": 25, "relative_humidity_percent": 50,
+          "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 400,
+          "leaf_temperature_c": 25, "airflow_m_per_s": 10},
+        "lighting_schedule": [{"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}]
+      }]}],
+      "root_zones": [{"id": "rz", "type": "Substrate", "substrate_bulk_volume_m3": 0.01,
+        "initial_water_volume_m3": 0.005, "substrate_hydraulic_profile_id": "synthetic_test_a",
+        "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}],
+      "plants": [{"id": "p", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rz",
+        "x_m": 0.5, "y_m": 0.5, "z_m": 0, "gas_exchange_profile_id": "synthetic_vegetative_test",
+        "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}]
+    })json";
+    const auto scenario = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scenario, 42);
+    sim.advance_fixed_step();
+    const auto& plant = sim.full_state_for_internal_use().plants[0];
+    require(plant.latent.gas_exchange.status == cannaville::gasexchange::ConvergenceStatus::Converged, "gas exchange may remain converged");
+    require(plant.latent.boundary_layer.status == cannaville::transpiration::ScientificDomainStatus::UnsupportedFlowRegime, "boundary layer must report unsupported flow");
+    require(!plant.latent.boundary_layer.value_mol_m2_s.has_value(), "unsupported boundary layer must have no conductance");
+    require(!plant.latent.transpiration.available, "transpiration must be unavailable");
+    require(plant.latent.transpiration.status == "unsupported_boundary_layer", "transpiration status must identify boundary-layer unavailability");
+    require_near(plant.latent.requested_water_mol, 0.0, 1e-12, "unavailable transpiration must not request water");
+    require_near(sim.full_state_for_internal_use().root_zones[0].cumulative_realized_withdrawal.value, 0.0, 1e-12, "unavailable transpiration must not withdraw water");
+
+    const auto header = csv_fields(sim.plant_physiology_csv_header());
+    const auto row = csv_fields(sim.plant_physiology_csv_row());
+    for (const std::string& field : {"gb", "transpiration_flux", "requested_water", "realized_water", "unmet_demand"}) {
+        require(row[csv_column(header, field)].empty(), "unavailable transpiration CSV field must be blank: " + field);
+    }
+    require(row[csv_column(header, "gas_exchange_status")] == "Converged", "gas exchange status should remain converged");
+    require(row[csv_column(header, "transpiration_status")] == "unsupported_boundary_layer", "CSV must expose boundary-layer unavailability");
+    std::cout << "UNSUPPORTED_BOUNDARY_LAYER gas=Converged boundary=UnsupportedFlowRegime transpiration=unavailable withdrawal_m3="
+              << sim.full_state_for_internal_use().root_zones[0].cumulative_realized_withdrawal.value << "\n";
+}
+
+void test_physiology_csv_g1_columns() {
+    const std::string json = R"json({
+      "schema_version": 1, "scenario_id": "g1_csv", "simulation_version": "0.1.0",
+      "fixed_timestep_seconds": 900,
+      "rooms": [{"id": "r", "width_m": 1, "depth_m": 1, "cell_size_m": 1, "cells": [{
+        "id": "c", "center_x_m": 0.5, "center_y_m": 0.5,
+        "environment": {"air_temperature_c": 25, "relative_humidity_percent": 50,
+          "atmospheric_pressure_kpa": 101.325, "co2_umol_per_mol": 400,
+          "leaf_temperature_c": 25, "airflow_m_per_s": 1},
+        "lighting_schedule": [{"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}]
+      }]}],
+      "root_zones": [{"id": "rz", "type": "Substrate", "substrate_bulk_volume_m3": 0.01,
+        "initial_water_volume_m3": 0.005, "substrate_hydraulic_profile_id": "synthetic_test_a",
+        "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}],
+      "plants": [{"id": "p", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rz",
+        "x_m": 0.5, "y_m": 0.5, "z_m": 0, "gas_exchange_profile_id": "synthetic_vegetative_test",
+        "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}]
+    })json";
+    cannaville::core::Simulation sim(cannaville::core::Scenario::load_json(json), 42);
+    sim.advance_fixed_step();
+    const auto& plant = sim.full_state_for_internal_use().plants[0];
+    const auto header = csv_fields(sim.plant_physiology_csv_header());
+    const auto row = csv_fields(sim.plant_physiology_csv_row());
+    const std::size_t reference_column = csv_column(header, "g1_reference");
+    const std::size_t effective_column = csv_column(header, "g1_effective");
+    require(effective_column == reference_column + 1, "g1 columns must be adjacent and ordered");
+    require_near(std::stod(row[reference_column]), plant.latent.gas_exchange.g1_reference, 1e-12, "g1_reference CSV value mismatch");
+    require_near(std::stod(row[effective_column]), plant.latent.gas_exchange.g1_effective, 1e-12, "g1_effective CSV value mismatch");
+    require_near(std::stod(row[reference_column]), 3.5, 1e-12, "g1_reference profile value mismatch");
+    std::cout << "G1_CSV g1_reference=" << row[reference_column] << " g1_effective=" << row[effective_column] << "\n";
 }
 
 void test_transpiration_robustness_sweep() {
@@ -1205,16 +1305,36 @@ void test_csv_schema_and_values() {
     sim.advance_fixed_step();
     std::string header = sim.root_zone_csv_header();
     std::string row = sim.root_zone_csv_row();
-    
-    require(header.find("interval_start_storage_m3") != std::string::npos, "CSV must contain interval_start_storage_m3");
-    require(header.find("interval_end_storage_m3") != std::string::npos, "CSV must contain interval_end_storage_m3");
-    require(header.find("capacity_m3") != std::string::npos, "CSV must contain capacity_m3");
-    require(header.find("cumulative_irrigation_m3") != std::string::npos, "CSV must contain cumulative_irrigation_m3");
-    require(header.find("cumulative_drainage_m3") != std::string::npos, "CSV must contain cumulative_drainage_m3");
-    require(header.find("cumulative_withdrawal_m3") != std::string::npos, "CSV must contain cumulative_withdrawal_m3");
-    require(header.find("conservation_residual_m3") != std::string::npos, "CSV must contain conservation_residual_m3");
-    
-    require(row.find("0.000000") != std::string::npos, "Conservation residual should be 0");
+
+    const auto header_fields = csv_fields(header);
+    const auto row_fields = csv_fields(row);
+    require(header_fields.size() == row_fields.size(), "Root-zone CSV header and row widths differ");
+    require(csv_column(header_fields, "conservation_initial_storage_m3") < header_fields.size(), "missing conservation initial storage");
+    require(csv_column(header_fields, "current_storage_m3") < header_fields.size(), "missing current storage");
+    require(csv_column(header_fields, "capacity_m3") < header_fields.size(), "missing capacity");
+    require(csv_column(header_fields, "substrate_bulk_volume_m3") < header_fields.size(), "missing substrate volume");
+    require(csv_column(header_fields, "cumulative_irrigation_topoff_m3") < header_fields.size(), "missing irrigation ledger");
+    require(csv_column(header_fields, "cumulative_external_return_m3") < header_fields.size(), "missing external return ledger");
+    require(csv_column(header_fields, "cumulative_realized_withdrawal_m3") < header_fields.size(), "missing realized withdrawal ledger");
+    require(csv_column(header_fields, "cumulative_drainage_discharge_m3") < header_fields.size(), "missing drainage ledger");
+    require(csv_column(header_fields, "cumulative_evaporation_m3") < header_fields.size(), "missing evaporation ledger");
+    require(csv_column(header_fields, "cumulative_unmet_demand_m3") < header_fields.size(), "missing unmet ledger");
+    const std::size_t residual_index = csv_column(header_fields, "conservation_residual_m3");
+    require(header.find("interval_start_storage_m3") == std::string::npos, "obsolete interval start label remains");
+    require(header.find("interval_end_storage_m3") == std::string::npos, "obsolete interval end label remains");
+    require(header.find("cumulative_irrigation_m3") == std::string::npos, "duplicate irrigation label remains");
+    require(header.find("cumulative_withdrawal_m3") == std::string::npos, "duplicate withdrawal label remains");
+
+    const double initial = std::stod(row_fields[csv_column(header_fields, "conservation_initial_storage_m3")]);
+    const double current = std::stod(row_fields[csv_column(header_fields, "current_storage_m3")]);
+    const double irrigation = std::stod(row_fields[csv_column(header_fields, "cumulative_irrigation_topoff_m3")]);
+    const double external_return = std::stod(row_fields[csv_column(header_fields, "cumulative_external_return_m3")]);
+    const double realized = std::stod(row_fields[csv_column(header_fields, "cumulative_realized_withdrawal_m3")]);
+    const double drainage = std::stod(row_fields[csv_column(header_fields, "cumulative_drainage_discharge_m3")]);
+    const double evaporation = std::stod(row_fields[csv_column(header_fields, "cumulative_evaporation_m3")]);
+    const double residual = std::stod(row_fields[residual_index]);
+    require_near(current, initial + irrigation + external_return - realized - drainage - evaporation, 1e-12, "CSV conservation recomputation failed");
+    require_near(residual, 0.0, 1e-12, "CSV conservation residual failed");
 }
 
 void test_save_load_event_and_conservation_continuation() {
@@ -1417,8 +1537,40 @@ void test_shared_dwc_shortage_and_reorder() {
     require_near(ud_A_A, ud_B_A, 1e-9, "Order must not affect proportional allocation A");
     require_near(ud_A_B, ud_B_B, 1e-9, "Order must not affect proportional allocation B");
     require_near(ud_A_B, ud_A_A * 2.0, 1e-4, "Perfectly proportional allocation");
-    
-    require(simA.full_state_for_internal_use().root_zones[0].current_water_volume.value >= 0.0, "No negative reservoir");
+
+    const auto& stateA = simA.full_state_for_internal_use();
+    const auto& stateB = simB.full_state_for_internal_use();
+    const auto& reservoirA = stateA.root_zones[0];
+    auto find_plant = [](const auto& state, const std::string& id) -> const auto& {
+        for (const auto& plant : state.plants) {
+            if (plant.id == id) return plant;
+        }
+        throw std::runtime_error("missing plant in DWC comparison: " + id);
+    };
+    for (const std::string& id : {std::string{"pA"}, std::string{"pB"}}) {
+        const auto& plantA = find_plant(stateA, id);
+        const auto& plantB = find_plant(stateB, id);
+        require_near(plantA.latent.requested_water_mol, plantB.latent.requested_water_mol, 1e-12, id + " request changed with order");
+        require_near(plantA.latent.realized_water_mol, plantB.latent.realized_water_mol, 1e-12, id + " realized withdrawal changed with order");
+        require_near(plantA.latent.unmet_demand_mol, plantB.latent.unmet_demand_mol, 1e-12, id + " unmet demand changed with order");
+    }
+    double total_request_m3 = 0.0;
+    double total_realized_m3 = 0.0;
+    double total_unmet_m3 = 0.0;
+    for (const auto& plant : stateA.plants) {
+        const double request_m3 = cannaville::rootzone::moles_water_to_cubic_meters(plant.latent.requested_water_mol);
+        const double realized_m3 = cannaville::rootzone::moles_water_to_cubic_meters(plant.latent.realized_water_mol);
+        const double unmet_m3 = cannaville::rootzone::moles_water_to_cubic_meters(plant.latent.unmet_demand_mol);
+        require_near(request_m3, realized_m3 + unmet_m3, 1e-12, plant.id + " request != realized + unmet");
+        total_request_m3 += request_m3;
+        total_realized_m3 += realized_m3;
+        total_unmet_m3 += unmet_m3;
+    }
+    require_near(total_request_m3, total_realized_m3 + total_unmet_m3, 1e-12, "DWC total request != realized + unmet");
+    require_near(0.0000001 - reservoirA.current_water_volume.value, total_realized_m3, 1e-12, "DWC initial-final does not equal realized withdrawal");
+    require(reservoirA.current_water_volume.value >= 0.0, "No negative reservoir");
+    std::cout << "DWC_CONSERVATION total_request_m3=" << total_request_m3 << " total_realized_m3=" << total_realized_m3
+              << " total_unmet_m3=" << total_unmet_m3 << " initial_minus_final_m3=" << (0.0000001 - reservoirA.current_water_volume.value) << "\n";
 }
 
 void test_mid_step_irrigation_segmented() {
@@ -1431,7 +1583,7 @@ void test_mid_step_irrigation_segmented() {
       "root_zones": [
         {
           "id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.01, 
-          "initial_water_volume_m3": 0.00101, "max_stored_water_m3": 0.01,
+          "initial_water_volume_m3": 0.00080, "max_stored_water_m3": 0.01,
           "substrate_hydraulic_profile_id": "synthetic_test_a",
           "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"
         }
@@ -1468,10 +1620,32 @@ void test_mid_step_irrigation_segmented() {
     
     cannaville::core::Simulation sim(parsed, 42);
     sim.advance_fixed_step(); // 900s step, irrigation at 420s (7 minutes in).
-    
-    // Check that we got irrigation
-    require(sim.full_state_for_internal_use().root_zones[0].cumulative_irrigation_top_off.value == 0.004, "Must irrigate 0.004");
-    require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.beta_hydraulic.value_or(0.0) == 1.0, "Instantaneous rate reflects final wet segment");
+
+    const auto& trace = sim.last_step_segment_trace();
+    require(trace.size() == 2, "Irrigation must produce two diagnostic segments");
+    require_near(trace[0].duration_s, 420.0, 1e-12, "Irrigation segment 1 duration");
+    require_near(trace[1].duration_s, 480.0, 1e-12, "Irrigation segment 2 duration");
+    require_near(trace[0].water_input_before_segment_m3, 0.0, 1e-12, "Irrigation appeared before segment 1");
+    require_near(trace[1].water_input_before_segment_m3, 0.004, 1e-12, "Irrigation did not appear between segments");
+    require_near(trace[1].root_zone_storage_at_segment_start_m3, trace[0].post_segment_storage_m3 + 0.004, 1e-12, "Segment 2 did not use post-irrigation inventory");
+    require(trace[0].beta_hydraulic.has_value() && trace[1].beta_hydraulic.has_value(), "Both irrigation segments need hydraulic beta");
+    require(trace[0].beta_hydraulic.value() < trace[1].beta_hydraulic.value(), "Segment 2 did not solve with the wet inventory");
+    require(trace[0].vwc_at_segment_start.has_value() && trace[1].vwc_at_segment_start.has_value(), "Both irrigation segments need VWC");
+    require(trace[0].vwc_at_segment_start.value() < trace[1].vwc_at_segment_start.value(), "Segment 2 did not use post-irrigation VWC");
+    require(trace[0].transpiration_available && trace[1].transpiration_available, "Both irrigation segments need transpiration diagnostics");
+    require(trace[0].transpiration_flux_mol_m2_s.has_value() && trace[1].transpiration_flux_mol_m2_s.has_value(), "Both irrigation segments need transpiration flux");
+    require(trace[0].requested_water_m3 > 0.0 && trace[1].requested_water_m3 > 0.0, "Both irrigation segments need requests");
+    const double segmented_realized = trace[0].realized_water_m3 + trace[1].realized_water_m3;
+    require_near(segmented_realized, sim.full_state_for_internal_use().root_zones[0].cumulative_realized_withdrawal.value, 1e-12, "Segment realized withdrawals do not sum to root-zone withdrawal");
+    require_near(sim.full_state_for_internal_use().root_zones[0].cumulative_irrigation_top_off.value, 0.004, 1e-12, "Must irrigate 0.004");
+    std::cout << "IRRIGATION_SEGMENT 1 duration_s=" << trace[0].duration_s << " vwc=" << trace[0].vwc_at_segment_start.value()
+              << " psi_mpa=" << trace[0].matric_potential_mpa.value() << " beta=" << trace[0].beta_hydraulic.value()
+              << " gs=" << trace[0].stomatal_conductance_mol_m2_s << " transpiration=" << trace[0].transpiration_flux_mol_m2_s.value()
+              << " requested_m3=" << trace[0].requested_water_m3 << " realized_m3=" << trace[0].realized_water_m3 << "\n";
+    std::cout << "IRRIGATION_SEGMENT 2 duration_s=" << trace[1].duration_s << " vwc=" << trace[1].vwc_at_segment_start.value()
+              << " psi_mpa=" << trace[1].matric_potential_mpa.value() << " beta=" << trace[1].beta_hydraulic.value()
+              << " gs=" << trace[1].stomatal_conductance_mol_m2_s << " transpiration=" << trace[1].transpiration_flux_mol_m2_s.value()
+              << " requested_m3=" << trace[1].requested_water_m3 << " realized_m3=" << trace[1].realized_water_m3 << "\n";
 }
 
 void test_mid_step_lighting_segmented() {
@@ -1519,9 +1693,24 @@ void test_mid_step_lighting_segmented() {
     
     cannaville::core::Simulation sim(parsed, 42);
     sim.advance_fixed_step();
-    // Verify some assimilation happened (so lights came on), but not as much as full 900s
-    require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.net_assimilation.value > 0.0, "Must have assimilated something");
-    require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.net_assimilation.value > 10.0, "Instantaneous rate reflects final lit segment");
+    const auto& trace = sim.last_step_segment_trace();
+    require(trace.size() == 2, "Lighting transition must produce two diagnostic segments");
+    require_near(trace[0].duration_s, 450.0, 1e-12, "Lighting segment 1 duration");
+    require_near(trace[1].duration_s, 450.0, 1e-12, "Lighting segment 2 duration");
+    require_near(trace[0].ppfd_umol_m2_s, 0.0, 1e-12, "Lighting segment 1 PPFD");
+    require_near(trace[1].ppfd_umol_m2_s, 1000.0, 1e-12, "Lighting segment 2 PPFD");
+    require(trace[0].net_assimilation_umol_m2_s != trace[1].net_assimilation_umol_m2_s, "Lighting segment physiological solutions must differ");
+    require(trace[0].stomatal_conductance_mol_m2_s != trace[1].stomatal_conductance_mol_m2_s, "Lighting segment stomatal solutions must differ");
+    require(trace[0].transpiration_available && trace[1].transpiration_available, "Both lighting segments need transpiration diagnostics");
+    require_near(trace[0].realized_water_m3 + trace[1].realized_water_m3,
+                 sim.full_state_for_internal_use().root_zones[0].cumulative_realized_withdrawal.value, 1e-12,
+                 "Lighting segment realized withdrawals do not sum to root-zone withdrawal");
+    std::cout << "LIGHTING_SEGMENT 1 duration_s=" << trace[0].duration_s << " ppfd=" << trace[0].ppfd_umol_m2_s
+              << " assimilation=" << trace[0].net_assimilation_umol_m2_s << " gs=" << trace[0].stomatal_conductance_mol_m2_s
+              << " requested_m3=" << trace[0].requested_water_m3 << " realized_m3=" << trace[0].realized_water_m3 << "\n";
+    std::cout << "LIGHTING_SEGMENT 2 duration_s=" << trace[1].duration_s << " ppfd=" << trace[1].ppfd_umol_m2_s
+              << " assimilation=" << trace[1].net_assimilation_umol_m2_s << " gs=" << trace[1].stomatal_conductance_mol_m2_s
+              << " requested_m3=" << trace[1].requested_water_m3 << " realized_m3=" << trace[1].realized_water_m3 << "\n";
 }
 
 void test_missing_configurations_split() {
@@ -1572,17 +1761,47 @@ void test_missing_configurations_split() {
         return sim;
     };
 
-    // Missing Gas Profile
-    auto s1 = get_sim([](auto& p) { p.plants[0].gas_exchange_profile_id = std::nullopt; });
-    require(s1.full_state_for_internal_use().plants[0].latent.gas_exchange.status == cannaville::gasexchange::ConvergenceStatus::MissingGasExchangeProfile, "MissingGasExchangeProfile");
+    auto assert_missing = [&](const std::string& name, auto modify, cannaville::gasexchange::ConvergenceStatus expected, const std::string& expected_transpiration_status) {
+        auto sim = get_sim(modify);
+        const auto& state = sim.full_state_for_internal_use();
+        const auto& plant = state.plants[0];
+        require(plant.latent.gas_exchange.status == expected, name + " gas-exchange status mismatch");
+        require(plant.latent.transpiration.status == expected_transpiration_status, name + " transpiration status mismatch");
+        require_near(state.root_zones[0].cumulative_realized_withdrawal.value, 0.0, 1e-12, name + " generated water withdrawal");
+        const auto header = csv_fields(sim.plant_physiology_csv_header());
+        const auto row = csv_fields(sim.plant_physiology_csv_row());
+        for (const std::string& field : {"gb", "transpiration_flux", "requested_water", "realized_water", "unmet_demand"}) {
+            require(row[csv_column(header, field)].empty(), name + " did not blank " + field);
+        }
+        if (expected == cannaville::gasexchange::ConvergenceStatus::MissingGasExchangeProfile) {
+            require(row[csv_column(header, "g1_reference")].empty(), name + " must leave g1_reference blank");
+        }
+        std::cout << "MISSING_CONFIG " << name << " gas=" << cannaville::gasexchange::to_string(expected)
+                  << " transpiration=" << expected_transpiration_status << " withdrawal_m3="
+                  << state.root_zones[0].cumulative_realized_withdrawal.value << "\n";
+    };
 
-    // Missing Substrate Hydraulic Profile
-    auto s2 = get_sim([](auto& p) { p.root_zones[0].substrate_hydraulic_profile_id = std::nullopt; });
-    require(s2.full_state_for_internal_use().plants[0].latent.gas_exchange.status == cannaville::gasexchange::ConvergenceStatus::MissingSubstrateHydraulicProfile, "MissingSubstrateHydraulicProfile");
-
-    // Missing Leaf Temp
-    auto s3 = get_sim([](auto& p) { p.rooms[0].cells[0].environment.leaf_temperature = std::nullopt; });
-    require(s3.full_state_for_internal_use().plants[0].latent.gas_exchange.status == cannaville::gasexchange::ConvergenceStatus::MissingLeafTemperature, "MissingLeafTemperature");
+    assert_missing("missing_gas_exchange_profile", [](auto& p) { p.plants[0].gas_exchange_profile_id = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingGasExchangeProfile, "missing_gas_exchange_profile");
+    assert_missing("missing_substrate_hydraulic_profile", [](auto& p) { p.root_zones[0].substrate_hydraulic_profile_id = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingSubstrateHydraulicProfile, "missing_substrate_hydraulic_profile");
+    assert_missing("missing_hydraulic_stress_transfer_profile", [](auto& p) { p.root_zones[0].hydraulic_stress_transfer_profile_id = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingHydraulicStressProfile, "missing_hydraulic_stress_profile");
+    assert_missing("missing_leaf_temperature", [](auto& p) { p.rooms[0].cells[0].environment.leaf_temperature = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingLeafTemperature, "missing_leaf_temperature");
+    assert_missing("missing_leaf_vpd", [](auto& p) { p.rooms[0].cells[0].environment.leaf_vpd = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingLeafVPD, "missing_leaf_vpd");
+    assert_missing("missing_airflow", [](auto& p) { p.rooms[0].cells[0].environment.airflow = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingAirflow, "missing_airflow");
+    assert_missing("missing_characteristic_leaf_dimension", [](auto& p) { p.plants[0].leaf_characteristic_dimension_m = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingLeafCharacteristicDimension, "missing_leaf_characteristic_dimension");
+    assert_missing("missing_effective_transpiring_leaf_area", [](auto& p) { p.plants[0].effective_transpiring_leaf_area_m2 = std::nullopt; },
+                   cannaville::gasexchange::ConvergenceStatus::MissingEffectiveTranspiringLeafArea, "missing_effective_transpiring_leaf_area");
+    assert_missing("dwc_without_explicit_unrestricted_water_access", [](auto& p) {
+        p.root_zones[0].type = "Reservoir";
+        p.root_zones[0].max_stored_water = cannaville::units::VolumeCubicMeters{0.01};
+        p.root_zones[0].explicit_unrestricted_water_access = std::nullopt;
+    }, cannaville::gasexchange::ConvergenceStatus::HydraulicStateUnavailable, "hydraulic_state_unavailable");
 }
 
 
@@ -1731,6 +1950,10 @@ int main() {
         test_gas_exchange();
         test_gas_exchange_robustness_and_domain_guards();
         test_transpiration();
+        test_unsupported_boundary_layer_integrated();
+        std::cout << "PASS: Integrated unsupported boundary-layer validity" << std::endl;
+        test_physiology_csv_g1_columns();
+        std::cout << "PASS: Physiology CSV g1 column contract" << std::endl;
         test_transpiration_robustness_sweep();
         test_rootzone_dry_down();
         test_rootzone_pulsed_irrigation();

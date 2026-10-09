@@ -56,6 +56,34 @@ void sample_plant_from_room(plants::PlantState& plant, const RoomState& room) {
     plant.sampled_lighting = cell.lighting;
 }
 
+double scheduled_ppfd_at(const lighting::LightingSchedule& schedule, double simulation_seconds) {
+    const double seconds_of_day = std::fmod(std::max(0.0, simulation_seconds), lighting::kSimulationDaySeconds);
+    for (const auto& segment : schedule.segments) {
+        if (seconds_of_day >= segment.start_of_day.value && seconds_of_day < segment.end_of_day.value) {
+            return segment.ppfd.value;
+        }
+    }
+    return 0.0;
+}
+
+std::string transpiration_status_for(gasexchange::ConvergenceStatus status) {
+    switch (status) {
+        case gasexchange::ConvergenceStatus::MissingGasExchangeProfile: return "missing_gas_exchange_profile";
+        case gasexchange::ConvergenceStatus::MissingSubstrateHydraulicProfile: return "missing_substrate_hydraulic_profile";
+        case gasexchange::ConvergenceStatus::MissingHydraulicStressProfile: return "missing_hydraulic_stress_profile";
+        case gasexchange::ConvergenceStatus::HydraulicStateUnavailable: return "hydraulic_state_unavailable";
+        case gasexchange::ConvergenceStatus::MissingLeafTemperature: return "missing_leaf_temperature";
+        case gasexchange::ConvergenceStatus::MissingLeafVPD: return "missing_leaf_vpd";
+        case gasexchange::ConvergenceStatus::MissingAirflow: return "missing_airflow";
+        case gasexchange::ConvergenceStatus::MissingLeafCharacteristicDimension: return "missing_leaf_characteristic_dimension";
+        case gasexchange::ConvergenceStatus::MissingEffectiveTranspiringLeafArea: return "missing_effective_transpiring_leaf_area";
+        case gasexchange::ConvergenceStatus::MissingHydraulicBeta: return "missing_hydraulic_beta";
+        case gasexchange::ConvergenceStatus::FailedToConverge: return "gas_exchange_failed_to_converge";
+        case gasexchange::ConvergenceStatus::NegativeVPD: return "negative_vpd";
+        default: return "unavailable";
+    }
+}
+
 } // namespace
 
 Simulation::Simulation(const Scenario& scenario, std::uint64_t seed) {
@@ -70,6 +98,7 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
 
     scenario_ = scenario;
     state_ = SimulationState{};
+    last_step_segment_trace_.clear();
     state_.config.simulation_version = scenario.simulation_version;
     state_.config.fixed_timestep = scenario.fixed_timestep;
     state_.scenario_id = scenario.scenario_id;
@@ -196,6 +225,7 @@ void Simulation::submit_player_action(const PlayerAction& /*action*/) {
 }
 
 void Simulation::advance_fixed_step() {
+    last_step_segment_trace_.clear();
     if (state_.rooms.empty()) {
         state_.clock.elapsed.value += state_.config.fixed_timestep.value;
         ++state_.clock.steps.value;
@@ -242,6 +272,7 @@ void Simulation::advance_fixed_step() {
         double segment_duration = next_boundary - current_time;
         if (segment_duration <= 0.0) continue;
 
+        std::unordered_map<std::string, double> segment_water_inputs;
         for (const auto& ev : scenario_.water_events) {
             if (std::abs(ev.timestamp.value - current_time) < 1e-9) {
                 for (auto& rz : state_.root_zones) {
@@ -259,6 +290,7 @@ void Simulation::advance_fixed_step() {
                             }
                             container.process_drainage(std::nullopt); // apply capacity
                             auto balance = container.get_last_balance();
+                            segment_water_inputs[rz.id] += balance.irrigation_added_m3 + balance.top_off_added_m3 + balance.external_return_flow_added_m3;
                             rz.cumulative_irrigation_top_off.value += balance.irrigation_added_m3 + balance.top_off_added_m3;
                             rz.cumulative_external_return_flow.value += balance.external_return_flow_added_m3;
                             rz.cumulative_drainage_discharge.value += balance.drainage_removed_m3 + balance.discharge_removed_m3;
@@ -276,6 +308,7 @@ void Simulation::advance_fixed_step() {
                             }
                             res.process_discharge(std::nullopt); // apply capacity
                             auto balance = res.get_last_balance();
+                            segment_water_inputs[rz.id] += balance.top_off_added_m3 + balance.external_return_flow_added_m3;
                             rz.cumulative_irrigation_top_off.value += balance.top_off_added_m3;
                             rz.cumulative_external_return_flow.value += balance.external_return_flow_added_m3;
                             rz.cumulative_drainage_discharge.value += balance.discharge_removed_m3 + balance.drainage_removed_m3;
@@ -326,15 +359,38 @@ void Simulation::advance_fixed_step() {
 
         std::unordered_map<std::string, std::vector<rootzone::TranspirationRequest>> requests_by_rz;
         std::unordered_map<std::string, std::vector<plants::PlantState*>> plants_by_rz;
+        std::unordered_map<std::string, std::size_t> diagnostic_index_by_plant;
 
         for (plants::PlantState& plant : state_.plants) {
             const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
                 return room.id == plant.location.room_id;
             });
-            if (room_it != state_.rooms.end()) sample_plant_from_room(plant, *room_it);
+            if (room_it != state_.rooms.end()) {
+                sample_plant_from_room(plant, *room_it);
+                if (!room_it->cells.empty()) {
+                    const std::size_t cell_index = cell_index_for(*room_it, plant.location.x, plant.location.y);
+                    const double segment_ppfd = scheduled_ppfd_at(room_it->cells.at(cell_index).lighting_schedule, current_time);
+                    plant.sampled_lighting.ppfd.value = segment_ppfd;
+                    plant.sampled_lighting.light_on = segment_ppfd > 0.0;
+                }
+            }
 
             gasexchange::ConvergenceStatus fail_status = gasexchange::ConvergenceStatus::NotRun;
             auto ge_profile = gasexchange::get_profile(plant.latent.gas_exchange.profile_id);
+
+            plant.latent.boundary_layer = transpiration::BoundaryLayerConductance{};
+            plant.latent.transpiration = transpiration::TranspirationResult{};
+            plant.latent.requested_water_mol = 0.0;
+            plant.latent.realized_water_mol = 0.0;
+            plant.latent.unmet_demand_mol = 0.0;
+            if (ge_profile.is_configured) {
+                plant.latent.gas_exchange.profile_id = ge_profile.id;
+                plant.latent.gas_exchange.g1_reference = ge_profile.medlyn.g1;
+            } else {
+                plant.latent.gas_exchange.profile_id = ge_profile.id;
+                plant.latent.gas_exchange.g1_reference = 0.0;
+                plant.latent.gas_exchange.g1_effective = 0.0;
+            }
             
             std::optional<double> beta = std::nullopt;
             if (root_zone_betas.count(plant.root_zone_id)) {
@@ -408,17 +464,20 @@ void Simulation::advance_fixed_step() {
                         plant.sampled_environment.atmospheric_pressure
                     );
 
-                    double requested_mol = plant.latent.transpiration.flux_mol_m2_s * (*plant.latent.effective_leaf_area_m2) * segment_duration;
-                    plant.latent.requested_water_mol = requested_mol;
+                    if (plant.latent.transpiration.available) {
+                        double requested_mol = plant.latent.transpiration.flux_mol_m2_s * (*plant.latent.effective_leaf_area_m2) * segment_duration;
+                        plant.latent.requested_water_mol = requested_mol;
 
-                    rootzone::TranspirationRequest req;
-                    req.flux = units::WaterFluxMolesPerSquareMeterSecond{plant.latent.transpiration.flux_mol_m2_s};
-                    req.area = units::AreaSquareMeters{*plant.latent.effective_leaf_area_m2};
-                    requests_by_rz[plant.root_zone_id].push_back(req);
-                    plants_by_rz[plant.root_zone_id].push_back(&plant);
+                        rootzone::TranspirationRequest req;
+                        req.flux = units::WaterFluxMolesPerSquareMeterSecond{plant.latent.transpiration.flux_mol_m2_s};
+                        req.area = units::AreaSquareMeters{*plant.latent.effective_leaf_area_m2};
+                        requests_by_rz[plant.root_zone_id].push_back(req);
+                        plants_by_rz[plant.root_zone_id].push_back(&plant);
+                    }
                 } else {
                     plant.latent.transpiration.flux_mol_m2_s = 0.0;
                     plant.latent.requested_water_mol = 0.0;
+                    plant.latent.transpiration.status = transpiration_status_for(plant.latent.gas_exchange.status);
                 }
             } else {
                 plant.latent.gas_exchange.status = fail_status;
@@ -427,7 +486,37 @@ void Simulation::advance_fixed_step() {
                 plant.latent.gas_exchange.intercellular_co2.value = 0.0;
                 plant.latent.transpiration.flux_mol_m2_s = 0.0;
                 plant.latent.requested_water_mol = 0.0;
+                plant.latent.transpiration.status = transpiration_status_for(fail_status);
             }
+
+            SegmentDiagnostic diagnostic;
+            diagnostic.plant_id = plant.id;
+            diagnostic.root_zone_id = plant.root_zone_id;
+            diagnostic.start_time_s = current_time;
+            diagnostic.duration_s = segment_duration;
+            diagnostic.ppfd_umol_m2_s = plant.sampled_lighting.ppfd.value;
+            diagnostic.water_input_before_segment_m3 = segment_water_inputs[plant.root_zone_id];
+            for (const auto& rz : state_.root_zones) {
+                if (rz.id == plant.root_zone_id) {
+                    diagnostic.root_zone_storage_at_segment_start_m3 = rz.current_water_volume.value;
+                    diagnostic.vwc_at_segment_start = rz.volumetric_water_content;
+                    diagnostic.matric_potential_mpa = rz.matric_potential;
+                    break;
+                }
+            }
+            diagnostic.beta_hydraulic = plant.latent.gas_exchange.beta_hydraulic;
+            diagnostic.g1_effective = plant.latent.gas_exchange.g1_effective;
+            diagnostic.stomatal_conductance_mol_m2_s = plant.latent.gas_exchange.stomatal_conductance.value;
+            diagnostic.net_assimilation_umol_m2_s = plant.latent.gas_exchange.net_assimilation.value;
+            diagnostic.transpiration_available = plant.latent.transpiration.available;
+            if (diagnostic.transpiration_available) {
+                diagnostic.transpiration_flux_mol_m2_s = plant.latent.transpiration.flux_mol_m2_s;
+            }
+            diagnostic.requested_water_m3 = rootzone::moles_water_to_cubic_meters(plant.latent.requested_water_mol);
+            diagnostic.gas_exchange_status = gasexchange::to_string(plant.latent.gas_exchange.status);
+            diagnostic.transpiration_status = plant.latent.transpiration.status;
+            diagnostic_index_by_plant[plant.id] = last_step_segment_trace_.size();
+            last_step_segment_trace_.push_back(std::move(diagnostic));
         }
 
         for (rootzone::RootZoneState& rz : state_.root_zones) {
@@ -460,6 +549,23 @@ void Simulation::advance_fixed_step() {
             for (size_t i = 0; i < plants.size(); ++i) {
                 plants[i]->latent.realized_water_mol = rootzone::cubic_meters_water_to_moles(realized_m3_list[i].value);
                 plants[i]->latent.unmet_demand_mol = std::max(0.0, plants[i]->latent.requested_water_mol - plants[i]->latent.realized_water_mol);
+                auto diagnostic_it = diagnostic_index_by_plant.find(plants[i]->id);
+                if (diagnostic_it != diagnostic_index_by_plant.end()) {
+                    SegmentDiagnostic& diagnostic = last_step_segment_trace_[diagnostic_it->second];
+                    diagnostic.realized_water_m3 = realized_m3_list[i].value;
+                    diagnostic.post_segment_storage_m3 = rz.current_water_volume.value;
+                }
+            }
+        }
+
+        for (SegmentDiagnostic& diagnostic : last_step_segment_trace_) {
+            if (diagnostic.start_time_s == current_time && diagnostic.post_segment_storage_m3 == 0.0) {
+                for (const auto& rz : state_.root_zones) {
+                    if (rz.id == diagnostic.root_zone_id) {
+                        diagnostic.post_segment_storage_m3 = rz.current_water_volume.value;
+                        break;
+                    }
+                }
             }
         }
 
@@ -519,6 +625,7 @@ std::string Simulation::serialize_state() const {
 
 void Simulation::load_serialized_state(std::string_view serialized) {
     state_ = deserialize_state_json(std::string(serialized));
+    last_step_segment_trace_.clear();
     scenario_ = Scenario{};
     scenario_.scenario_id = state_.scenario_id;
     scenario_.water_events = state_.water_events;
@@ -620,9 +727,9 @@ std::string Simulation::csv_row() const {
 }
 
 std::string Simulation::root_zone_csv_header() const {
-    return "timestamp_s,root_zone_id,type,substrate_bulk_volume_m3,interval_start_storage_m3,cumulative_irrigation_m3,cumulative_drainage_m3,cumulative_withdrawal_m3,interval_end_storage_m3,capacity_m3,conservation_residual_m3,"
-           "vwc,storage_fraction,irrigation_topoff_m3,external_return_m3,"
-           "realized_withdrawal_m3,drainage_discharge_m3,evaporation_m3,unmet_demand_m3,residual_m3\n";
+    return "timestamp_s,root_zone_id,type,conservation_initial_storage_m3,current_storage_m3,capacity_m3,substrate_bulk_volume_m3,vwc,storage_fraction,"
+           "cumulative_irrigation_topoff_m3,cumulative_external_return_m3,cumulative_realized_withdrawal_m3,cumulative_drainage_discharge_m3,"
+           "cumulative_evaporation_m3,cumulative_unmet_demand_m3,conservation_residual_m3\n";
 }
 std::string Simulation::root_zone_csv_row() const {
     std::string output;
@@ -643,15 +750,10 @@ std::string Simulation::root_zone_csv_row() const {
         );
 
         output += std::to_string(state_.clock.elapsed.value) + "," + rz.id + "," + type_str + ",";
-        output += std::to_string(rz.substrate_bulk_volume.value) + ",";
         output += std::to_string(initial_water) + ",";
-        output += std::to_string(rz.cumulative_irrigation_top_off.value) + ",";
-        output += std::to_string(rz.cumulative_drainage_discharge.value) + ",";
-        output += std::to_string(rz.cumulative_realized_withdrawal.value) + ",";
         output += std::to_string(rz.current_water_volume.value) + ",";
         output += rz.max_stored_water.has_value() ? std::to_string(rz.max_stored_water->value) : "";
-        output += ",";
-        output += std::to_string(residual) + ",";
+        output += "," + std::to_string(rz.substrate_bulk_volume.value) + ",";
         output += vwc_str + "," + frac_str + ",";
         output += std::to_string(rz.cumulative_irrigation_top_off.value) + ",";
         output += std::to_string(rz.cumulative_external_return_flow.value) + ",";
@@ -704,7 +806,8 @@ std::string Simulation::plant_physiology_csv_row() const {
             }
         }
 
-        bool ok = (ge.status == gasexchange::ConvergenceStatus::Converged);
+        const bool gas_exchange_available = (ge.status == gasexchange::ConvergenceStatus::Converged);
+        const bool transpiration_available = gas_exchange_available && tr.available;
         
         output += std::to_string(state_.clock.elapsed.value) + ",";
         output += plant.id + "," + plant.location.room_id + ",";
@@ -713,20 +816,25 @@ std::string Simulation::plant_physiology_csv_row() const {
         output += ppfd + "," + press + "," + airf + "," + ltemp + "," + lvpd + ",";
         output += vwc + "," + mat + "," + hstat + ",";
         output += (ge.beta_hydraulic ? std::to_string(*ge.beta_hydraulic) : "") + ",";
-        output += ","; // g1 reference (omitted for now)
-        output += (ok ? std::to_string(ge.g1_effective) : "") + ",";
-        output += (ok ? std::to_string(ge.net_assimilation.value) : "") + ",";
-        output += (ok ? std::to_string(ge.stomatal_conductance.value) : "") + ",";
-        output += (ok && plant.latent.boundary_layer.value_mol_m2_s ? std::to_string(*plant.latent.boundary_layer.value_mol_m2_s) : "") + ",";
-        output += (ok ? std::to_string(tr.flux_mol_m2_s) : "") + ",";
-        output += (ok && plant.latent.effective_leaf_area_m2 ? std::to_string(*plant.latent.effective_leaf_area_m2) : "") + ",";
-        output += (ok ? std::to_string(plant.latent.requested_water_mol) : "") + ",";
-        output += (ok ? std::to_string(plant.latent.realized_water_mol) : "") + ",";
-        output += (ok ? std::to_string(plant.latent.unmet_demand_mol) : "") + ",";
-        output += std::to_string(static_cast<int>(ge.status)) + ",";
+        const bool gas_profile_available = !ge.profile_id.empty() && ge.profile_id != "unconfigured";
+        output += (gas_profile_available ? std::to_string(ge.g1_reference) : "") + ",";
+        output += (gas_exchange_available ? std::to_string(ge.g1_effective) : "") + ",";
+        output += (gas_exchange_available ? std::to_string(ge.net_assimilation.value) : "") + ",";
+        output += (gas_exchange_available ? std::to_string(ge.stomatal_conductance.value) : "") + ",";
+        output += (transpiration_available && plant.latent.boundary_layer.value_mol_m2_s ? std::to_string(*plant.latent.boundary_layer.value_mol_m2_s) : "") + ",";
+        output += (transpiration_available ? std::to_string(tr.flux_mol_m2_s) : "") + ",";
+        output += (transpiration_available && plant.latent.effective_leaf_area_m2 ? std::to_string(*plant.latent.effective_leaf_area_m2) : "") + ",";
+        output += (transpiration_available ? std::to_string(plant.latent.requested_water_mol) : "") + ",";
+        output += (transpiration_available ? std::to_string(plant.latent.realized_water_mol) : "") + ",";
+        output += (transpiration_available ? std::to_string(plant.latent.unmet_demand_mol) : "") + ",";
+        output += gasexchange::to_string(ge.status) + ",";
         output += tr.status + "\n";
     }
     return output;
+}
+
+const std::vector<SegmentDiagnostic>& Simulation::last_step_segment_trace() const {
+    return last_step_segment_trace_;
 }
 
 } // namespace cannaville::core
