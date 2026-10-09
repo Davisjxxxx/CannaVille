@@ -191,6 +191,7 @@ json::Value root_zone_json(const rootzone::RootZoneState& value) {
     }
     
     // State
+    obj["interval_start_water_volume_m3"] = number(value.interval_start_water_volume.value);
     obj["current_water_volume_m3"] = number(value.current_water_volume.value);
     
     if (value.volumetric_water_content.has_value()) {
@@ -207,6 +208,9 @@ json::Value root_zone_json(const rootzone::RootZoneState& value) {
     obj["cumulative_drainage_discharge_m3"] = number(value.cumulative_drainage_discharge.value);
     obj["cumulative_evaporation_m3"] = number(value.cumulative_evaporation.value);
     obj["cumulative_unmet_demand_m3"] = number(value.cumulative_unmet_demand.value);
+    if (value.substrate_hydraulic_profile_id) obj["substrate_hydraulic_profile_id"] = string_value(*value.substrate_hydraulic_profile_id);
+    if (value.hydraulic_stress_transfer_profile_id) obj["hydraulic_stress_transfer_profile_id"] = string_value(*value.hydraulic_stress_transfer_profile_id);
+    if (value.explicit_unrestricted_water_access) obj["explicit_unrestricted_water_access"] = json::Value(*value.explicit_unrestricted_water_access);
     
     // Legacy placeholders
     obj["root_zone_temperature_c"] = number(value.root_zone_temperature.value);
@@ -230,6 +234,8 @@ void read_root_zone(const json::Value& object, rootzone::RootZoneState& value) {
         value.max_stored_water = std::nullopt;
     }
     
+    if (auto* v = object.find("interval_start_water_volume_m3")) value.interval_start_water_volume.value = v->as_number();
+    else if (auto* c = object.find("current_water_volume_m3")) value.interval_start_water_volume.value = c->as_number();
     if (auto* v = object.find("current_water_volume_m3")) value.current_water_volume.value = v->as_number();
     
     if (auto* v = object.find("volumetric_water_content_m3_m3")) {
@@ -250,6 +256,10 @@ void read_root_zone(const json::Value& object, rootzone::RootZoneState& value) {
     value.cumulative_drainage_discharge.value = object.find("cumulative_drainage_discharge_m3") ? object.find("cumulative_drainage_discharge_m3")->as_number() : 0.0;
     value.cumulative_evaporation.value = object.find("cumulative_evaporation_m3") ? object.find("cumulative_evaporation_m3")->as_number() : 0.0;
     value.cumulative_unmet_demand.value = object.find("cumulative_unmet_demand_m3") ? object.find("cumulative_unmet_demand_m3")->as_number() : 0.0;
+    
+    if (auto* v = object.find("substrate_hydraulic_profile_id"); v && v->is_string()) value.substrate_hydraulic_profile_id = v->as_string();
+    if (auto* v = object.find("hydraulic_stress_transfer_profile_id"); v && v->is_string()) value.hydraulic_stress_transfer_profile_id = v->as_string();
+    if (auto* v = object.find("explicit_unrestricted_water_access"); v && v->is_boolean()) value.explicit_unrestricted_water_access = v->as_boolean();
     
     value.root_zone_temperature.value = object.find("root_zone_temperature_c") ? object.find("root_zone_temperature_c")->as_number() : 20.0;
     value.ph.value = object.find("ph") ? object.find("ph")->as_number() : 6.0;
@@ -501,6 +511,17 @@ std::string serialize_state_json(const SimulationState& state) {
     json::Value::Array plant_values;
     for (const cannaville::plants::PlantState& plant : state.plants) plant_values.push_back(plant_json(plant));
 
+    json::Value::Array water_events;
+    for (const auto& ev : state.water_events) {
+        water_events.push_back(json::Value({
+            {"id", string_value(ev.id)},
+            {"timestamp", number(ev.timestamp.value)},
+            {"root_zone_id", string_value(ev.root_zone_id)},
+            {"type", string_value(ev.type)},
+            {"amount", number(ev.amount.value)}
+        }));
+    }
+
     return json::stringify(json::Value({
         {"state_schema_version", number(1.0)},
         {"config", json::Value({
@@ -520,6 +541,7 @@ std::string serialize_state_json(const SimulationState& state) {
         {"rooms", json::Value(std::move(rooms))},
         {"root_zones", json::Value(std::move(root_zones))},
         {"plants", json::Value(std::move(plant_values))},
+        {"water_events", json::Value(std::move(water_events))}
     }));
 }
 
@@ -563,6 +585,18 @@ SimulationState deserialize_state_json(const std::string& serialized) {
         plants::PlantState plant;
         read_plant(value, plant);
         state.plants.push_back(std::move(plant));
+    }
+    const json::Value* events = root.find("water_events");
+    if (events != nullptr && events->is_array()) {
+        for (const auto& ev_val : events->as_array()) {
+            ScenarioWaterEvent ev;
+            ev.id = string_field(ev_val, "id");
+            ev.timestamp.value = number_field(ev_val, "timestamp");
+            ev.root_zone_id = string_field(ev_val, "root_zone_id");
+            ev.type = string_field(ev_val, "type");
+            ev.amount.value = number_field(ev_val, "amount");
+            state.water_events.push_back(std::move(ev));
+        }
     }
     return state;
 }

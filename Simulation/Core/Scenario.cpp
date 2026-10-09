@@ -135,7 +135,9 @@ Scenario Scenario::load_json(std::string_view json_text) {
             ScenarioRootZoneDefinition rz;
             rz.id = require_string(rz_value, "id");
             rz.type = require_string(rz_value, "type");
-            rz.substrate_bulk_volume.value = require_number(rz_value, "substrate_bulk_volume_m3");
+            const json::Value* sub_vol = rz_value.find("substrate_bulk_volume_m3");
+            if (sub_vol != nullptr) rz.substrate_bulk_volume.value = sub_vol->as_number();
+            else rz.substrate_bulk_volume.value = 0.0;
             const json::Value* max_water = rz_value.find("max_stored_water_m3");
             if (max_water != nullptr) {
                 rz.max_stored_water = units::VolumeCubicMeters{max_water->as_number()};
@@ -273,9 +275,20 @@ std::vector<std::string> Scenario::validate() const {
         if (rz.type != "Substrate" && rz.type != "Reservoir") {
             errors.push_back("root_zone " + rz.id + " type must be Substrate or Reservoir");
         }
-        if (rz.substrate_bulk_volume.value <= 0.0) {
-            errors.push_back("root_zone " + rz.id + " substrate_bulk_volume_m3 must be positive");
+        
+        if (rz.type == "Substrate") {
+            if (rz.substrate_bulk_volume.value <= 0.0) {
+                errors.push_back("root_zone " + rz.id + " substrate_bulk_volume_m3 must be positive");
+            }
+        } else if (rz.type == "Reservoir") {
+            if (!rz.max_stored_water.has_value() || rz.max_stored_water->value <= 0.0) {
+                errors.push_back("root_zone " + rz.id + " capacity_m3/max_stored_water_m3 must be positive for reservoir");
+            }
+            if (rz.max_stored_water.has_value() && rz.initial_water_volume.value > rz.max_stored_water->value) {
+                errors.push_back("root_zone " + rz.id + " initial_water_volume_m3 cannot exceed capacity");
+            }
         }
+        
         if (rz.max_stored_water.has_value() && rz.max_stored_water->value < 0.0) {
             errors.push_back("root_zone " + rz.id + " max_stored_water_m3 cannot be negative");
         }

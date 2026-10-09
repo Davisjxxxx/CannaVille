@@ -74,6 +74,7 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
     state_.config.fixed_timestep = scenario.fixed_timestep;
     state_.scenario_id = scenario.scenario_id;
     state_.stochastic.seed = seed;
+    state_.water_events = scenario.water_events;
 
     for (const ScenarioRoomDefinition& definition : scenario.rooms) {
         RoomState room;
@@ -274,26 +275,45 @@ void Simulation::advance_fixed_step() {
             });
             if (room_it != state_.rooms.end()) sample_plant_from_room(plant, *room_it);
 
-            bool can_compute_physiology = true;
-            if (plant.latent.gas_exchange.profile_id.empty()) can_compute_physiology = false;
+            gasexchange::ConvergenceStatus fail_status = gasexchange::ConvergenceStatus::NotRun;
             auto ge_profile = gasexchange::get_profile(plant.latent.gas_exchange.profile_id);
-            if (!ge_profile.is_configured) can_compute_physiology = false;
-
+            
             std::optional<double> beta = std::nullopt;
             if (root_zone_betas.count(plant.root_zone_id)) {
                 beta = root_zone_betas[plant.root_zone_id];
             }
-            if (!beta.has_value()) can_compute_physiology = false;
 
-            if (!plant.sampled_environment.physics_available) can_compute_physiology = false;
-            if (!plant.sampled_environment.leaf_temperature.has_value()) can_compute_physiology = false;
-            if (!plant.sampled_environment.leaf_vpd.has_value()) can_compute_physiology = false;
-            if (!plant.sampled_environment.airflow.has_value()) can_compute_physiology = false;
-            if (!plant.latent.effective_leaf_area_m2.has_value()) can_compute_physiology = false;
-            if (!plant.latent.leaf_characteristic_dimension_m.has_value()) can_compute_physiology = false;
+            if (plant.latent.gas_exchange.profile_id.empty() || !ge_profile.is_configured) {
+                fail_status = gasexchange::ConvergenceStatus::MissingGasExchangeProfile;
+            } else if (!beta.has_value()) {
+                // Determine why beta is missing
+                fail_status = gasexchange::ConvergenceStatus::MissingHydraulicBeta;
+                for (const auto& rz : state_.root_zones) {
+                    if (rz.id == plant.root_zone_id) {
+                        if (rz.type == rootzone::RootZoneType::Substrate) {
+                            if (!rz.substrate_hydraulic_profile_id.has_value()) fail_status = gasexchange::ConvergenceStatus::MissingSubstrateHydraulicProfile;
+                            else if (!rz.hydraulic_stress_transfer_profile_id.has_value()) fail_status = gasexchange::ConvergenceStatus::MissingHydraulicStressProfile;
+                            else fail_status = gasexchange::ConvergenceStatus::HydraulicStateUnavailable;
+                        } else {
+                            if (!rz.explicit_unrestricted_water_access.value_or(false)) fail_status = gasexchange::ConvergenceStatus::HydraulicStateUnavailable;
+                        }
+                    }
+                }
+            } else if (!plant.sampled_environment.physics_available) {
+                fail_status = gasexchange::ConvergenceStatus::MissingLeafTemperature; // proxy
+            } else if (!plant.sampled_environment.leaf_temperature.has_value()) {
+                fail_status = gasexchange::ConvergenceStatus::MissingLeafTemperature;
+            } else if (!plant.sampled_environment.leaf_vpd.has_value()) {
+                fail_status = gasexchange::ConvergenceStatus::MissingLeafVPD;
+            } else if (!plant.sampled_environment.airflow.has_value()) {
+                fail_status = gasexchange::ConvergenceStatus::MissingAirflow;
+            } else if (!plant.latent.leaf_characteristic_dimension_m.has_value()) {
+                fail_status = gasexchange::ConvergenceStatus::MissingLeafCharacteristicDimension;
+            } else if (!plant.latent.effective_leaf_area_m2.has_value()) {
+                fail_status = gasexchange::ConvergenceStatus::MissingEffectiveTranspiringLeafArea;
+            }
 
-
-            if (can_compute_physiology) {
+            if (fail_status == gasexchange::ConvergenceStatus::NotRun) {
                 units::PPFDMicromolesPerSquareMeterSecond ppfd = plant.sampled_lighting.ppfd;
                 units::CO2MicromolesPerMole ambient_co2 = plant.sampled_environment.carbon_dioxide;
                 units::VPDKPa vpd = *plant.sampled_environment.leaf_vpd;
@@ -343,7 +363,7 @@ void Simulation::advance_fixed_step() {
                     plant.latent.requested_water_mol = 0.0;
                 }
             } else {
-                plant.latent.gas_exchange.status = gasexchange::ConvergenceStatus::MissingCalibrationProfile;
+                plant.latent.gas_exchange.status = fail_status;
                 plant.latent.gas_exchange.net_assimilation.value = 0.0;
                 plant.latent.gas_exchange.stomatal_conductance.value = 0.0;
                 plant.latent.gas_exchange.intercellular_co2.value = 0.0;
@@ -443,6 +463,7 @@ void Simulation::load_serialized_state(std::string_view serialized) {
     state_ = deserialize_state_json(std::string(serialized));
     scenario_ = Scenario{};
     scenario_.scenario_id = state_.scenario_id;
+    scenario_.water_events = state_.water_events;
     scenario_.simulation_version = state_.config.simulation_version;
     scenario_.fixed_timestep = state_.config.fixed_timestep;
     for (const RoomState& room : state_.rooms) {
@@ -464,7 +485,7 @@ void Simulation::load_serialized_state(std::string_view serialized) {
         scenario_rz.type = (rz.type == rootzone::RootZoneType::Reservoir) ? "Reservoir" : "Substrate";
         scenario_rz.substrate_bulk_volume = rz.substrate_bulk_volume;
         scenario_rz.max_stored_water = rz.max_stored_water;
-        scenario_rz.initial_water_volume = rz.current_water_volume;
+        scenario_rz.initial_water_volume = rz.interval_start_water_volume;
         scenario_.root_zones.push_back(std::move(scenario_rz));
     }
     for (const plants::PlantState& plant : state_.plants) {
@@ -541,8 +562,8 @@ std::string Simulation::csv_row() const {
 }
 
 std::string Simulation::root_zone_csv_header() const {
-    return "timestamp_s,root_zone_id,type,initial_storage_m3,current_water_volume_m3,final_storage_m3,"
-           "substrate_bulk_volume_m3,vwc,storage_fraction,irrigation_topoff_m3,external_return_m3,"
+    return "timestamp_s,root_zone_id,type,substrate_bulk_volume_m3,interval_start_storage_m3,cumulative_irrigation_m3,cumulative_drainage_m3,cumulative_withdrawal_m3,interval_end_storage_m3,capacity_m3,conservation_residual_m3,"
+           "vwc,storage_fraction,irrigation_topoff_m3,external_return_m3,"
            "realized_withdrawal_m3,drainage_discharge_m3,evaporation_m3,unmet_demand_m3,residual_m3\n";
 }
 std::string Simulation::root_zone_csv_row() const {
@@ -552,13 +573,7 @@ std::string Simulation::root_zone_csv_row() const {
         std::string vwc_str = rz.volumetric_water_content.has_value() ? std::to_string(*rz.volumetric_water_content) : "";
         std::string frac_str = rz.storage_fraction.has_value() ? std::to_string(*rz.storage_fraction) : "";
 
-        double initial_water = 0.0;
-        for (const auto& s_rz : scenario_.root_zones) {
-            if (s_rz.id == rz.id) {
-                initial_water = s_rz.initial_water_volume.value;
-                break;
-            }
-        }
+        double initial_water = rz.interval_start_water_volume.value;
         
         double residual = rz.current_water_volume.value - (
             initial_water + 
@@ -570,10 +585,15 @@ std::string Simulation::root_zone_csv_row() const {
         );
 
         output += std::to_string(state_.clock.elapsed.value) + "," + rz.id + "," + type_str + ",";
-        output += std::to_string(initial_water) + ",";
-        output += std::to_string(rz.current_water_volume.value) + ",";
-        output += std::to_string(rz.max_stored_water.has_value() ? rz.max_stored_water->value : 0.0) + ",";
         output += std::to_string(rz.substrate_bulk_volume.value) + ",";
+        output += std::to_string(initial_water) + ",";
+        output += std::to_string(rz.cumulative_irrigation_top_off.value) + ",";
+        output += std::to_string(rz.cumulative_drainage_discharge.value) + ",";
+        output += std::to_string(rz.cumulative_realized_withdrawal.value) + ",";
+        output += std::to_string(rz.current_water_volume.value) + ",";
+        output += rz.max_stored_water.has_value() ? std::to_string(rz.max_stored_water->value) : "";
+        output += ",";
+        output += std::to_string(residual) + ",";
         output += vwc_str + "," + frac_str + ",";
         output += std::to_string(rz.cumulative_irrigation_top_off.value) + ",";
         output += std::to_string(rz.cumulative_external_return_flow.value) + ",";
@@ -587,20 +607,59 @@ std::string Simulation::root_zone_csv_row() const {
 }
 
 std::string Simulation::plant_physiology_csv_header() const {
-    return "timestamp_s,plant_id,net_assimilation,intercellular_co2,stomatal_conductance,g1_effective,beta_hydraulic,status\n";
+    return "timestamp_s,plant_id,room_id,x,y,z,cell_id,root_zone_id,ppfd,pressure,airflow,leaf_temperature,leaf_vpd,vwc,matric_potential,hydraulic_status,beta,g1_reference,g1_effective,assimilation,gs,gb,transpiration_flux,effective_leaf_area,requested_water,realized_water,unmet_demand,gas_exchange_status,transpiration_status\n";
 }
 
 std::string Simulation::plant_physiology_csv_row() const {
     std::string output;
     for (const plants::PlantState& plant : state_.plants) {
         const auto& ge = plant.latent.gas_exchange;
-        output += std::to_string(state_.clock.elapsed.value) + "," + plant.id + ",";
-        output += std::to_string(ge.net_assimilation.value) + ",";
-        output += std::to_string(ge.intercellular_co2.value) + ",";
-        output += std::to_string(ge.stomatal_conductance.value) + ",";
+        const auto& tr = plant.latent.transpiration;
+        
+        std::string ppfd = "", press = "", airf = "", ltemp = "", lvpd = "";
+        std::string vwc = "", mat = "", hstat = "";
+        std::string c_id = "";
+        
+        // Find cell ID and environment from rooms
+        for (const auto& room : state_.rooms) {
+            if (room.id == plant.location.room_id) {
+                if (!room.cells.empty()) {
+                    c_id = room.cells.front().id;
+                    const auto& env = room.cells.front().environment;
+                    ppfd = std::to_string(room.cells.front().lighting.ppfd.value);
+                    press = std::to_string(env.atmospheric_pressure.value);
+                    if (env.airflow) airf = std::to_string(env.airflow->value);
+                    if (env.leaf_temperature) ltemp = std::to_string(env.leaf_temperature->value);
+                    if (env.leaf_vpd) lvpd = std::to_string(env.leaf_vpd->value);
+                }
+            }
+        }
+        
+        for (const auto& rz : state_.root_zones) {
+            if (rz.id == plant.root_zone_id) {
+                if (rz.volumetric_water_content) vwc = std::to_string(*rz.volumetric_water_content);
+            }
+        }
+
+        output += std::to_string(state_.clock.elapsed.value) + ",";
+        output += plant.id + "," + plant.location.room_id + ",";
+        output += std::to_string(plant.location.x.value) + "," + std::to_string(plant.location.y.value) + "," + std::to_string(plant.location.z.value) + ",";
+        output += c_id + "," + plant.root_zone_id + ",";
+        output += ppfd + "," + press + "," + airf + "," + ltemp + "," + lvpd + ",";
+        output += vwc + "," + mat + "," + hstat + ",";
+        output += (ge.beta_hydraulic ? std::to_string(*ge.beta_hydraulic) : "") + ",";
+        output += ","; // g1 reference (omitted for now)
         output += std::to_string(ge.g1_effective) + ",";
-        output += ge.beta_hydraulic.has_value() ? std::to_string(*ge.beta_hydraulic) : "";
-        output += "," + std::to_string(static_cast<int>(ge.status)) + "\n";
+        output += std::to_string(ge.net_assimilation.value) + ",";
+        output += std::to_string(ge.stomatal_conductance.value) + ",";
+        output += (plant.latent.boundary_layer.value_mol_m2_s ? std::to_string(*plant.latent.boundary_layer.value_mol_m2_s) : "") + ",";
+        output += std::to_string(tr.flux_mol_m2_s) + ",";
+        output += (plant.latent.effective_leaf_area_m2 ? std::to_string(*plant.latent.effective_leaf_area_m2) : "") + ",";
+        output += std::to_string(plant.latent.requested_water_mol) + ",";
+        output += std::to_string(plant.latent.realized_water_mol) + ",";
+        output += std::to_string(plant.latent.unmet_demand_mol) + ",";
+        output += std::to_string(static_cast<int>(ge.status)) + ",";
+        output += tr.status + "\n";
     }
     return output;
 }

@@ -5,6 +5,7 @@
 #include "Simulation/Lighting/LightingState.hpp"
 #include "Simulation/Plants/PlantState.hpp"
 #include "Simulation/RootZone/RootZoneState.hpp"
+#include "Simulation/Core/Scenario.hpp"
 
 #include <cstdint>
 #include <string>
@@ -54,6 +55,7 @@ struct SimulationState {
     std::vector<RoomState> rooms;
     std::vector<rootzone::RootZoneState> root_zones;
     std::vector<plants::PlantState> plants;
+    std::vector<ScenarioWaterEvent> water_events;
 };
 
 struct ObservablePlantState {

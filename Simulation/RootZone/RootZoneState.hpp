@@ -23,6 +23,7 @@ struct RootZoneState {
     std::optional<bool> explicit_unrestricted_water_access;
     
     // Dynamic physical state
+    units::VolumeCubicMeters interval_start_water_volume{};
     units::VolumeCubicMeters current_water_volume{};
     
     // Derived (computed on read/write or strictly physical)
