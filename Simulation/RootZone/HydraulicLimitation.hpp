@@ -76,6 +76,23 @@ enum class HydraulicStatus {
     NumericalFailure
 };
 
+
+inline std::string to_string(HydraulicStatus status) {
+    switch (status) {
+        case HydraulicStatus::Valid: return "Valid";
+        case HydraulicStatus::MissingSubstrateHydraulicProfile: return "MissingSubstrateHydraulicProfile";
+        case HydraulicStatus::MissingHydraulicStressCalibration: return "MissingHydraulicStressCalibration";
+        case HydraulicStatus::OutsideRetentionModelDomain: return "OutsideRetentionModelDomain";
+        case HydraulicStatus::OutsideStressCalibrationDomain: return "OutsideStressCalibrationDomain";
+        case HydraulicStatus::HydraulicLimitationDisabled: return "HydraulicLimitationDisabled";
+        case HydraulicStatus::InsufficientRootzoneWater: return "InsufficientRootzoneWater";
+        case HydraulicStatus::HydraulicStateUnavailable: return "HydraulicStateUnavailable";
+        case HydraulicStatus::UnrestrictedWaterAccess: return "UnrestrictedWaterAccess";
+        case HydraulicStatus::NumericalFailure: return "NumericalFailure";
+        default: return "Unknown";
+    }
+}
+
 struct HydraulicState {
     std::string substrate_profile_id;
     std::string stress_transfer_profile_id;

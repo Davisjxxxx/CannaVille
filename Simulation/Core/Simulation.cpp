@@ -119,9 +119,47 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
         rz.substrate_bulk_volume = definition.substrate_bulk_volume;
         rz.max_stored_water = definition.max_stored_water;
         rz.current_water_volume = definition.initial_water_volume;
+        rz.interval_start_water_volume = definition.initial_water_volume;
         rz.substrate_hydraulic_profile_id = definition.substrate_hydraulic_profile_id;
         rz.hydraulic_stress_transfer_profile_id = definition.hydraulic_stress_transfer_profile_id;
         rz.explicit_unrestricted_water_access = definition.explicit_unrestricted_water_access;
+        
+        if (rz.type == rootzone::RootZoneType::Substrate) {
+            rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
+            rz.volumetric_water_content = container.volumetric_water_content();
+            rz.storage_fraction = container.storage_fraction();
+            
+            if (rz.substrate_hydraulic_profile_id.has_value() && rz.hydraulic_stress_transfer_profile_id.has_value()) {
+                auto sub_prof = rootzone::get_missing_substrate_profile();
+                if (*rz.substrate_hydraulic_profile_id == "synthetic_test_a") sub_prof = rootzone::get_synthetic_substrate_test_profile_a();
+                else if (*rz.substrate_hydraulic_profile_id == "synthetic_test_b") sub_prof = rootzone::get_synthetic_substrate_test_profile_b();
+                
+                auto stress_prof = rootzone::get_missing_stress_profile();
+                if (*rz.hydraulic_stress_transfer_profile_id == "synthetic_stress_test") stress_prof = rootzone::get_synthetic_stress_test_profile();
+
+                if (sub_prof.is_valid() && stress_prof.is_valid()) {
+                    double current_vwc = rz.volumetric_water_content.value_or(0.0);
+                    auto hydraulic_state = rootzone::compute_substrate_hydraulic_limitation(current_vwc, sub_prof, stress_prof);
+                    rz.matric_potential = hydraulic_state.matric_potential_mpa;
+                    rz.hydraulic_status = rootzone::to_string(hydraulic_state.status);
+                } else {
+                    rz.hydraulic_status = "MissingProfiles";
+                }
+            } else {
+                rz.hydraulic_status = "NoProfileSpecified";
+            }
+        } else {
+            rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
+            rz.volumetric_water_content = std::nullopt;
+            rz.storage_fraction = res.storage_fraction();
+            rz.matric_potential = std::nullopt;
+            
+            bool has_sufficient_water = rz.current_water_volume.value > 0.0;
+            bool explicit_access = rz.explicit_unrestricted_water_access.value_or(false);
+            auto hydraulic_state = rootzone::compute_dwc_hydraulic_limitation(has_sufficient_water, false, explicit_access);
+            rz.hydraulic_status = rootzone::to_string(hydraulic_state.status);
+        }
+        
         state_.root_zones.push_back(std::move(rz));
     }
 
@@ -208,24 +246,41 @@ void Simulation::advance_fixed_step() {
             if (std::abs(ev.timestamp.value - current_time) < 1e-9) {
                 for (auto& rz : state_.root_zones) {
                     if (rz.id == ev.root_zone_id) {
-                        if (ev.type == "irrigation" || ev.type == "top_off") {
-                            rz.current_water_volume.value += ev.amount.value;
-                            if (rz.type == rootzone::RootZoneType::Substrate) {
-                                rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
-                                rz.current_water_volume = container.current_water();
-                                rz.cumulative_irrigation_top_off.value += ev.amount.value;
-                            } else {
-                                rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
-                                rz.current_water_volume = res.current_water();
-                                rz.cumulative_irrigation_top_off.value += ev.amount.value;
+                        if (rz.type == rootzone::RootZoneType::Substrate) {
+                            rootzone::SubstrateContainer container(rz.substrate_bulk_volume, rz.current_water_volume, rz.max_stored_water);
+                            if (ev.type == "irrigation") {
+                                container.irrigate(ev.amount);
+                            } else if (ev.type == "top_off") {
+                                container.add_top_off(ev.amount);
+                            } else if (ev.type == "external_return") {
+                                container.add_external_return_flow(ev.amount);
+                            } else if (ev.type == "drainage") {
+                                container.process_drainage(ev.amount);
                             }
-                        } else if (ev.type == "external_return") {
-                            rz.current_water_volume.value += ev.amount.value;
-                            rz.cumulative_external_return_flow.value += ev.amount.value;
-                        } else if (ev.type == "drainage" || ev.type == "discharge") {
-                            double actual = std::min(rz.current_water_volume.value, ev.amount.value);
-                            rz.current_water_volume.value -= actual;
-                            rz.cumulative_drainage_discharge.value += actual;
+                            container.process_drainage(std::nullopt); // apply capacity
+                            auto balance = container.get_last_balance();
+                            rz.cumulative_irrigation_top_off.value += balance.irrigation_added_m3 + balance.top_off_added_m3;
+                            rz.cumulative_external_return_flow.value += balance.external_return_flow_added_m3;
+                            rz.cumulative_drainage_discharge.value += balance.drainage_removed_m3 + balance.discharge_removed_m3;
+                            rz.current_water_volume = container.current_water();
+                            rz.volumetric_water_content = container.volumetric_water_content();
+                            rz.storage_fraction = container.storage_fraction();
+                        } else {
+                            rootzone::HydroponicReservoir res(rz.max_stored_water.value_or(units::VolumeCubicMeters{0.0}), rz.current_water_volume);
+                            if (ev.type == "top_off" || ev.type == "irrigation") {
+                                res.add_top_off(ev.amount);
+                            } else if (ev.type == "external_return") {
+                                res.add_external_return_flow(ev.amount);
+                            } else if (ev.type == "discharge" || ev.type == "drainage") {
+                                res.process_discharge(ev.amount);
+                            }
+                            res.process_discharge(std::nullopt); // apply capacity
+                            auto balance = res.get_last_balance();
+                            rz.cumulative_irrigation_top_off.value += balance.top_off_added_m3;
+                            rz.cumulative_external_return_flow.value += balance.external_return_flow_added_m3;
+                            rz.cumulative_drainage_discharge.value += balance.discharge_removed_m3 + balance.drainage_removed_m3;
+                            rz.current_water_volume = res.current_water();
+                            rz.storage_fraction = res.storage_fraction();
                         }
                     }
                 }
@@ -254,15 +309,18 @@ void Simulation::advance_fixed_step() {
                         double current_vwc = rz.substrate_bulk_volume.value > 0.0 ? rz.current_water_volume.value / rz.substrate_bulk_volume.value : 0.0;
                         auto hydraulic_state = rootzone::compute_substrate_hydraulic_limitation(current_vwc, sub_prof, stress_prof);
                         root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
+                        rz.matric_potential = hydraulic_state.matric_potential_mpa;
+                        rz.hydraulic_status = rootzone::to_string(hydraulic_state.status);
                     }
                 }
             } else {
                 bool has_sufficient_water = rz.current_water_volume.value > 0.0;
                 bool explicit_access = rz.explicit_unrestricted_water_access.value_or(false);
+                auto hydraulic_state = rootzone::compute_dwc_hydraulic_limitation(has_sufficient_water, false, explicit_access);
                 if (explicit_access) {
-                    auto hydraulic_state = rootzone::compute_dwc_hydraulic_limitation(has_sufficient_water, false, explicit_access);
                     root_zone_betas[rz.id] = hydraulic_state.beta_hydraulic;
                 }
+                rz.hydraulic_status = rootzone::to_string(hydraulic_state.status);
             }
         }
 
@@ -620,17 +678,20 @@ std::string Simulation::plant_physiology_csv_row() const {
         std::string vwc = "", mat = "", hstat = "";
         std::string c_id = "";
         
-        // Find cell ID and environment from rooms
         for (const auto& room : state_.rooms) {
             if (room.id == plant.location.room_id) {
                 if (!room.cells.empty()) {
-                    c_id = room.cells.front().id;
-                    const auto& env = room.cells.front().environment;
-                    ppfd = std::to_string(room.cells.front().lighting.ppfd.value);
-                    press = std::to_string(env.atmospheric_pressure.value);
-                    if (env.airflow) airf = std::to_string(env.airflow->value);
-                    if (env.leaf_temperature) ltemp = std::to_string(env.leaf_temperature->value);
-                    if (env.leaf_vpd) lvpd = std::to_string(env.leaf_vpd->value);
+                    auto idx = cell_index_for(room, plant.location.x, plant.location.y);
+                    if (idx < room.cells.size()) {
+                        const auto& cell = room.cells[idx];
+                        c_id = cell.id;
+                        const auto& env = cell.environment;
+                        ppfd = std::to_string(cell.lighting.ppfd.value);
+                        press = std::to_string(env.atmospheric_pressure.value);
+                        if (env.airflow) airf = std::to_string(env.airflow->value);
+                        if (env.leaf_temperature) ltemp = std::to_string(env.leaf_temperature->value);
+                        if (env.leaf_vpd) lvpd = std::to_string(env.leaf_vpd->value);
+                    }
                 }
             }
         }
@@ -638,9 +699,13 @@ std::string Simulation::plant_physiology_csv_row() const {
         for (const auto& rz : state_.root_zones) {
             if (rz.id == plant.root_zone_id) {
                 if (rz.volumetric_water_content) vwc = std::to_string(*rz.volumetric_water_content);
+                if (rz.matric_potential) mat = std::to_string(*rz.matric_potential);
+                if (rz.hydraulic_status) hstat = *rz.hydraulic_status;
             }
         }
 
+        bool ok = (ge.status == gasexchange::ConvergenceStatus::Converged);
+        
         output += std::to_string(state_.clock.elapsed.value) + ",";
         output += plant.id + "," + plant.location.room_id + ",";
         output += std::to_string(plant.location.x.value) + "," + std::to_string(plant.location.y.value) + "," + std::to_string(plant.location.z.value) + ",";
@@ -649,15 +714,15 @@ std::string Simulation::plant_physiology_csv_row() const {
         output += vwc + "," + mat + "," + hstat + ",";
         output += (ge.beta_hydraulic ? std::to_string(*ge.beta_hydraulic) : "") + ",";
         output += ","; // g1 reference (omitted for now)
-        output += std::to_string(ge.g1_effective) + ",";
-        output += std::to_string(ge.net_assimilation.value) + ",";
-        output += std::to_string(ge.stomatal_conductance.value) + ",";
-        output += (plant.latent.boundary_layer.value_mol_m2_s ? std::to_string(*plant.latent.boundary_layer.value_mol_m2_s) : "") + ",";
-        output += std::to_string(tr.flux_mol_m2_s) + ",";
-        output += (plant.latent.effective_leaf_area_m2 ? std::to_string(*plant.latent.effective_leaf_area_m2) : "") + ",";
-        output += std::to_string(plant.latent.requested_water_mol) + ",";
-        output += std::to_string(plant.latent.realized_water_mol) + ",";
-        output += std::to_string(plant.latent.unmet_demand_mol) + ",";
+        output += (ok ? std::to_string(ge.g1_effective) : "") + ",";
+        output += (ok ? std::to_string(ge.net_assimilation.value) : "") + ",";
+        output += (ok ? std::to_string(ge.stomatal_conductance.value) : "") + ",";
+        output += (ok && plant.latent.boundary_layer.value_mol_m2_s ? std::to_string(*plant.latent.boundary_layer.value_mol_m2_s) : "") + ",";
+        output += (ok ? std::to_string(tr.flux_mol_m2_s) : "") + ",";
+        output += (ok && plant.latent.effective_leaf_area_m2 ? std::to_string(*plant.latent.effective_leaf_area_m2) : "") + ",";
+        output += (ok ? std::to_string(plant.latent.requested_water_mol) : "") + ",";
+        output += (ok ? std::to_string(plant.latent.realized_water_mol) : "") + ",";
+        output += (ok ? std::to_string(plant.latent.unmet_demand_mol) : "") + ",";
         output += std::to_string(static_cast<int>(ge.status)) + ",";
         output += tr.status + "\n";
     }

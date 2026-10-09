@@ -37,6 +37,8 @@ struct RootZoneState {
     units::VolumeCubicMeters cumulative_drainage_discharge{};
     units::VolumeCubicMeters cumulative_evaporation{};
     units::VolumeCubicMeters cumulative_unmet_demand{};
+    std::optional<double> matric_potential{};
+    std::optional<std::string> hydraulic_status{};
     
     // Legacy placeholders
     units::TemperatureCelsius root_zone_temperature{};

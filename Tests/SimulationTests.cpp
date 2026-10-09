@@ -909,7 +909,7 @@ void test_end_to_end_substrate() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}
       ],
@@ -959,7 +959,7 @@ void test_end_to_end_shared_dwc() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {"id": "rz1", "type": "Reservoir", "substrate_bulk_volume_m3": 0.1, "initial_water_volume_m3": 0.1, "max_stored_water_m3": 0.1, "explicit_unrestricted_water_access": true}
       ],
@@ -1009,7 +1009,7 @@ void test_end_to_end_two_substrate() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"},
         {"id": "rz2", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}
@@ -1048,7 +1048,7 @@ void test_end_to_end_determinism() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}
       ],
@@ -1084,7 +1084,7 @@ void test_missing_configurations() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {"id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}
       ],
@@ -1121,7 +1121,7 @@ void test_explicit_synthetic_scenario() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {
           "id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009,
@@ -1167,7 +1167,7 @@ void test_mid_step_irrigation_0807() {
               {"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000}
             ]
           }
-        ]}],
+        ]],
       "root_zones": [
         {
           "id": "rz1", "type": "Substrate", "substrate_bulk_volume_m3": 0.019, "initial_water_volume_m3": 0.009,
@@ -1202,7 +1202,9 @@ void test_mid_step_irrigation_0807() {
 
 void test_csv_schema_and_values() {
     cannaville::core::Simulation sim(cannaville::core::Scenario::load_json(smoke_json), 42);
+    sim.advance_fixed_step();
     std::string header = sim.root_zone_csv_header();
+    std::string row = sim.root_zone_csv_row();
     
     require(header.find("interval_start_storage_m3") != std::string::npos, "CSV must contain interval_start_storage_m3");
     require(header.find("interval_end_storage_m3") != std::string::npos, "CSV must contain interval_end_storage_m3");
@@ -1211,6 +1213,8 @@ void test_csv_schema_and_values() {
     require(header.find("cumulative_drainage_m3") != std::string::npos, "CSV must contain cumulative_drainage_m3");
     require(header.find("cumulative_withdrawal_m3") != std::string::npos, "CSV must contain cumulative_withdrawal_m3");
     require(header.find("conservation_residual_m3") != std::string::npos, "CSV must contain conservation_residual_m3");
+    
+    require(row.find("0.000000") != std::string::npos, "Conservation residual should be 0");
 }
 
 void test_save_load_event_and_conservation_continuation() {
@@ -1290,67 +1294,60 @@ void test_two_substrate_causal_chain() {
       "fixed_timestep_seconds": 900,
       "rooms": [{"id": "r", "width_m": 4, "depth_m": 4, "cell_size_m": 1}],
       "root_zones": [
-        {
-          "id": "rzA", "type": "Substrate", "substrate_bulk_volume_m3": 0.01, 
-          "initial_water_volume_m3": 0.00101, "max_stored_water_m3": 0.01,
-          "substrate_hydraulic_profile_id": "synthetic_test_a",
-          "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"
-        },
-        {
-          "id": "rzB", "type": "Substrate", "substrate_bulk_volume_m3": 0.01, 
-          "initial_water_volume_m3": 0.00101, "max_stored_water_m3": 0.01,
-          "substrate_hydraulic_profile_id": "synthetic_test_b",
-          "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"
-        }
+          {"id": "rz_a", "type": "Substrate", "substrate_bulk_volume_m3": 0.05, "initial_water_volume_m3": 0.00508, "max_stored_water_m3": 0.05, "substrate_hydraulic_profile_id": "synthetic_test_a", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"},
+          {"id": "rz_b", "type": "Substrate", "substrate_bulk_volume_m3": 0.05, "initial_water_volume_m3": 0.00508, "max_stored_water_m3": 0.05, "substrate_hydraulic_profile_id": "synthetic_test_b", "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"}
       ],
       "plants": [
-        {
-          "id": "pA", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rzA", 
-          "x_m": 0, "y_m": 0, "z_m": 0,
-          "gas_exchange_profile_id": "synthetic_vegetative_test",
-          "effective_transpiring_leaf_area_m2": 0.1,
-          "leaf_characteristic_dimension_m": 0.05
-        },
-        {
-          "id": "pB", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rzB", 
-          "x_m": 0, "y_m": 0, "z_m": 0,
-          "gas_exchange_profile_id": "synthetic_vegetative_test",
-          "effective_transpiring_leaf_area_m2": 0.1,
-          "leaf_characteristic_dimension_m": 0.05
-        }
-      ]
+          {"id": "p_a", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rz_a", "x_m": 0.5, "y_m": 0.5, "z_m": 0, "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05},
+          {"id": "p_b", "room_id": "r", "cultivar_id": "c", "root_zone_id": "rz_b", "x_m": 1.5, "y_m": 0.5, "z_m": 0, "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}
+      ],
+      "water_events": []
     })";
     auto parsed = cannaville::core::Scenario::load_json(json);
     cannaville::core::ScenarioCellDefinition cell_def;
-        cell_def.id = "c1";
-        cell_def.center_x.value = 0.5;
-        cell_def.center_y.value = 0.5;
-        cell_def.environment.air_temperature.value = 25.0;
-        cell_def.environment.relative_humidity.value = 50.0;
-        cell_def.environment.atmospheric_pressure.value = 101.3;
-        cell_def.environment.carbon_dioxide.value = 400.0;
-        cell_def.environment.airflow = cannaville::units::AirflowMetersPerSecond{1.0};
-        cell_def.environment.leaf_temperature = cannaville::units::Celsius{25.0};
-        cell_def.environment.leaf_vpd = cannaville::units::VPDKPa{1.5};
-        cell_def.environment.physics_available = true;
-        parsed.rooms[0].cells.push_back(cell_def);
-    parsed.rooms[0].cells[0].lighting_schedule.segments.push_back({0, 86400, 1000.0});
+    cell_def.id = "c1"; cell_def.center_x.value = 0.5; cell_def.center_y.value = 0.5;
+    cell_def.environment.air_temperature.value = 25.0; cell_def.environment.relative_humidity.value = 50.0;
+    cell_def.environment.atmospheric_pressure.value = 101.3; cell_def.environment.carbon_dioxide.value = 400.0;
+    cell_def.environment.airflow = cannaville::units::AirflowMetersPerSecond{1.0};
+    cell_def.environment.leaf_temperature = cannaville::units::Celsius{25.0};
+    cell_def.environment.leaf_vpd = cannaville::units::VPDKPa{1.5};
+    cell_def.environment.physics_available = true;
+    cell_def.lighting_schedule.segments.push_back({0, 86400, 1000.0});
+    parsed.rooms[0].cells.push_back(cell_def);
+    
+    cannaville::core::ScenarioCellDefinition cell_def_b = cell_def;
+    cell_def_b.id = "c2"; cell_def_b.center_x.value = 1.5;
+    parsed.rooms[0].cells.push_back(cell_def_b);
     
     cannaville::core::Simulation sim(parsed, 42);
+    
+    auto st_initial = sim.full_state_for_internal_use();
+    double init_vwc_a = st_initial.root_zones[0].volumetric_water_content.value();
+    double init_vwc_b = st_initial.root_zones[1].volumetric_water_content.value();
+    require_near(init_vwc_a, init_vwc_b, 1e-9, "Initial VWC should be equal");
+    
     sim.advance_fixed_step();
+    auto st = sim.full_state_for_internal_use();
     
-    double betaA = sim.full_state_for_internal_use().plants[0].latent.gas_exchange.beta_hydraulic.value_or(1.0);
-    double betaB = sim.full_state_for_internal_use().plants[1].latent.gas_exchange.beta_hydraulic.value_or(1.0);
-    double gsA = sim.full_state_for_internal_use().plants[0].latent.gas_exchange.stomatal_conductance.value;
-    double gsB = sim.full_state_for_internal_use().plants[1].latent.gas_exchange.stomatal_conductance.value;
-    double trA = sim.full_state_for_internal_use().plants[0].latent.transpiration.flux_mol_m2_s;
-    double trB = sim.full_state_for_internal_use().plants[1].latent.transpiration.flux_mol_m2_s;
+    double psi_a = st.root_zones[0].matric_potential.value();
+    double psi_b = st.root_zones[1].matric_potential.value();
+    require(std::abs(psi_a - psi_b) > 0.01, "Matric potential should differ");
     
+    double beta_a = st.plants[0].latent.gas_exchange.beta_hydraulic.value_or(1.0);
+    double beta_b = st.plants[1].latent.gas_exchange.beta_hydraulic.value_or(1.0);
+    require(std::abs(beta_a - beta_b) > 0.01, "Beta should differ");
     
-    if (betaA == betaB) { std::cout << "DEBUG betaA: " << betaA << " statusA: " << static_cast<int>(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.status) << " statusB: " << static_cast<int>(sim.full_state_for_internal_use().plants[1].latent.gas_exchange.status) << std::endl; }
-    require(betaA != betaB, "Different retention profiles with same VWC must yield different beta");
-    require(gsA != gsB, "Different beta must yield different stomatal conductance");
-    require(trA != trB, "Different stomatal conductance must yield different transpiration");
+    double g1_a = st.plants[0].latent.gas_exchange.g1_effective;
+    double g1_b = st.plants[1].latent.gas_exchange.g1_effective;
+    require(std::abs(g1_a - g1_b) > 0.01, "g1_effective should differ");
+    
+    double gs_a = st.plants[0].latent.gas_exchange.stomatal_conductance.value;
+    double gs_b = st.plants[1].latent.gas_exchange.stomatal_conductance.value;
+    require(std::abs(gs_a - gs_b) > 0.001, "Stomatal conductance should differ");
+    
+    double tr_a = st.plants[0].latent.requested_water_mol;
+    double tr_b = st.plants[1].latent.requested_water_mol;
+    require(std::abs(tr_a - tr_b) > 0.01, "Requested water should differ");
 }
 
 void test_shared_dwc_shortage_and_reorder() {
@@ -1419,6 +1416,7 @@ void test_shared_dwc_shortage_and_reorder() {
     require(ud_A_A > 0 && ud_A_B > 0, "Must have unmet demand");
     require_near(ud_A_A, ud_B_A, 1e-9, "Order must not affect proportional allocation A");
     require_near(ud_A_B, ud_B_B, 1e-9, "Order must not affect proportional allocation B");
+    require_near(ud_A_B, ud_A_A * 2.0, 1e-4, "Perfectly proportional allocation");
     
     require(simA.full_state_for_internal_use().root_zones[0].current_water_volume.value >= 0.0, "No negative reservoir");
 }
@@ -1473,6 +1471,7 @@ void test_mid_step_irrigation_segmented() {
     
     // Check that we got irrigation
     require(sim.full_state_for_internal_use().root_zones[0].cumulative_irrigation_top_off.value == 0.004, "Must irrigate 0.004");
+    require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.beta_hydraulic.value_or(0.0) == 1.0, "Instantaneous rate reflects final wet segment");
 }
 
 void test_mid_step_lighting_segmented() {
@@ -1522,6 +1521,7 @@ void test_mid_step_lighting_segmented() {
     sim.advance_fixed_step();
     // Verify some assimilation happened (so lights came on), but not as much as full 900s
     require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.net_assimilation.value > 0.0, "Must have assimilated something");
+    require(sim.full_state_for_internal_use().plants[0].latent.gas_exchange.net_assimilation.value > 10.0, "Instantaneous rate reflects final lit segment");
 }
 
 void test_missing_configurations_split() {
@@ -1586,6 +1586,135 @@ void test_missing_configurations_split() {
 }
 
 
+
+
+void test_fresh_simulation_conservation_residual() {
+    std::string json = R"({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1",
+      "fixed_timestep_seconds": 3600,
+      "rooms": [{"id": "r", "width_m": 4, "depth_m": 4, "cell_size_m": 1}],
+      "root_zones": [
+          {
+              "id": "rz1",
+              "type": "Substrate",
+              "substrate_bulk_volume_m3": 0.05,
+              "initial_water_volume_m3": 0.015,
+              "substrate_hydraulic_profile_id": "synthetic_test_a",
+              "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"
+          }
+      ],
+      "plants": [
+          {"id": "p", "room_id": "r", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0.0, "cultivar_id": "c1", "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}
+      ],
+      "water_events": []
+    })";
+    cannaville::core::Scenario scen = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scen, 42);
+    auto st = sim.full_state_for_internal_use();
+    require(st.root_zones[0].interval_start_water_volume.value == 0.015, "Initial water must be populated");
+    double residual = st.root_zones[0].current_water_volume.value - (st.root_zones[0].interval_start_water_volume.value + st.root_zones[0].cumulative_irrigation_top_off.value + st.root_zones[0].cumulative_external_return_flow.value - st.root_zones[0].cumulative_drainage_discharge.value - st.root_zones[0].cumulative_realized_withdrawal.value - st.root_zones[0].cumulative_evaporation.value);
+    require(std::abs(residual) < 1e-9, "Residual must be 0 before step");
+    sim.advance_fixed_step();
+    st = sim.full_state_for_internal_use();
+    residual = st.root_zones[0].current_water_volume.value - (st.root_zones[0].interval_start_water_volume.value + st.root_zones[0].cumulative_irrigation_top_off.value + st.root_zones[0].cumulative_external_return_flow.value - st.root_zones[0].cumulative_drainage_discharge.value - st.root_zones[0].cumulative_realized_withdrawal.value - st.root_zones[0].cumulative_evaporation.value);
+    require(std::abs(residual) < 1e-9, "Residual must be 0 after step");
+}
+
+void test_substrate_overflow_capacity() {
+    std::string json = R"({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1",
+      "fixed_timestep_seconds": 900,
+      "rooms": [{"id": "r", "width_m": 4, "depth_m": 4, "cell_size_m": 1}],
+      "root_zones": [
+          {
+              "id": "rz1",
+              "type": "Substrate",
+              "substrate_bulk_volume_m3": 0.05,
+              "max_stored_water_m3": 0.02,
+              "initial_water_volume_m3": 0.015,
+              "substrate_hydraulic_profile_id": "synthetic_test_a",
+              "hydraulic_stress_transfer_profile_id": "synthetic_stress_test"
+          }
+      ],
+      "plants": [
+          {"id": "p", "room_id": "r", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0.0, "cultivar_id": "c1", "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}
+      ],
+      "water_events": [
+          {"id": "w1", "timestamp_s": 0, "root_zone_id": "rz1", "type": "irrigation", "amount_m3": 0.01}
+      ]
+    })";
+    cannaville::core::Scenario scen = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scen, 42);
+    sim.advance_fixed_step();
+    auto st = sim.full_state_for_internal_use();
+    require(st.root_zones[0].current_water_volume.value <= 0.02, "Storage must not exceed capacity");
+    require(st.root_zones[0].cumulative_drainage_discharge.value > 0.0, "Drainage must occur explicitly");
+    double residual = st.root_zones[0].current_water_volume.value - (st.root_zones[0].interval_start_water_volume.value + st.root_zones[0].cumulative_irrigation_top_off.value + st.root_zones[0].cumulative_external_return_flow.value - st.root_zones[0].cumulative_drainage_discharge.value - st.root_zones[0].cumulative_realized_withdrawal.value - st.root_zones[0].cumulative_evaporation.value);
+    require(std::abs(residual) < 1e-9, "Conservation closes");
+}
+
+void test_reservoir_overflow_capacity() {
+    std::string json = R"({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1",
+      "fixed_timestep_seconds": 900,
+      "rooms": [{"id": "r", "width_m": 4, "depth_m": 4, "cell_size_m": 1}],
+      "root_zones": [
+          {
+              "id": "rz1",
+              "type": "Reservoir",
+              "max_stored_water_m3": 100.0,
+              "initial_water_volume_m3": 95.0,
+              "explicit_unrestricted_water_access": true
+          }
+      ],
+      "plants": [
+          {"id": "p", "room_id": "r", "root_zone_id": "rz1", "x_m": 0.5, "y_m": 0.5, "z_m": 0.0, "cultivar_id": "c1", "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}
+      ],
+      "water_events": [
+          {"id": "w1", "timestamp_s": 0, "root_zone_id": "rz1", "type": "top_off", "amount_m3": 10.0}
+      ]
+    })";
+    cannaville::core::Scenario scen = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scen, 42);
+    sim.advance_fixed_step();
+    auto st = sim.full_state_for_internal_use();
+    require(st.root_zones[0].current_water_volume.value <= 100.0, "Storage must not exceed capacity");
+    require(st.root_zones[0].cumulative_drainage_discharge.value >= 4.9, "Discharge must occur explicitly");
+}
+
+void test_multicell_physiology_csv_spatial() {
+    std::string json = R"({
+      "schema_version": 1,
+      "scenario_id": "test",
+      "simulation_version": "0.1",
+      "fixed_timestep_seconds": 900,
+      "rooms": [{"id": "r", "width_m": 2, "depth_m": 1, "cell_size_m": 1,
+          "cells": [
+              {"id": "cell-0-0", "center_x_m": 0.5, "center_y_m": 0.5, "environment": {"air_temperature_c": 25.0, "relative_humidity_percent": 50.0, "co2_umol_per_mol": 400.0, "atmospheric_pressure_kpa": 101.325, "airflow_m_per_s": 1.0}, "lighting_schedule": [{"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 500.0}]},
+              {"id": "cell-1-0", "center_x_m": 1.5, "center_y_m": 0.5, "environment": {"air_temperature_c": 25.0, "relative_humidity_percent": 50.0, "co2_umol_per_mol": 400.0, "atmospheric_pressure_kpa": 101.325, "airflow_m_per_s": 2.0}, "lighting_schedule": [{"start_seconds": 0, "end_seconds": 86400, "ppfd_umol_per_m2_s": 1000.0}]}
+          ]
+      }],
+      "root_zones": [{"id": "rz1", "type": "Reservoir", "max_stored_water_m3": 100.0, "initial_water_volume_m3": 95.0, "explicit_unrestricted_water_access": true}],
+      "plants": [
+          {"id": "p1", "room_id": "r", "root_zone_id": "rz1", "x_m": 1.5, "y_m": 0.5, "z_m": 0.0, "cultivar_id": "c1", "gas_exchange_profile_id": "synthetic_vegetative_test", "effective_transpiring_leaf_area_m2": 0.1, "leaf_characteristic_dimension_m": 0.05}
+      ],
+      "water_events": []
+    })";
+    cannaville::core::Scenario scen = cannaville::core::Scenario::load_json(json);
+    cannaville::core::Simulation sim(scen, 42);
+    sim.advance_fixed_step();
+    std::string csv = sim.plant_physiology_csv_row();
+    std::cout << "CSV:" << csv << "\n";
+    require(csv.find("cell-1-0") != std::string::npos, "Must report the correct cell");
+    require(csv.find("1000.000000") != std::string::npos, "Must report PPFD from cell-1-0");
+}
+
 int main() {
     try {
         test_deterministic_repeated_runs();
@@ -1612,6 +1741,16 @@ int main() {
         test_rootzone_robustness_sweep();
         test_rootzone_ledger_serialization();
         test_hydraulic_limitation();
+
+        test_fresh_simulation_conservation_residual();
+        std::cout << "PASS: Fresh simulation residual result" << std::endl;
+        test_substrate_overflow_capacity();
+        std::cout << "PASS: Substrate overflow event result" << std::endl;
+        test_reservoir_overflow_capacity();
+        std::cout << "PASS: Reservoir overflow event result" << std::endl;
+        test_multicell_physiology_csv_spatial();
+        std::cout << "PASS: Multi-cell physiology CSV spatial result" << std::endl;
+
         
         // P1B.4.1C explicit requested tests
         test_csv_schema_and_values();
