@@ -67,12 +67,48 @@ enum class ConvergenceStatus {
     MissingLeafTemperature,
     MissingCalibrationProfile,
     NegativeVPD,
+    MissingGasExchangeProfile,
+    MissingSubstrateHydraulicProfile,
+    MissingHydraulicStressProfile,
+    HydraulicStateUnavailable,
+    MissingLeafVPD,
+    MissingAirflow,
+    MissingLeafCharacteristicDimension,
+    MissingEffectiveTranspiringLeafArea,
+    MissingHydraulicBeta,
+    UnsupportedBoundaryLayerRegime
 };
+
+inline std::string to_string(ConvergenceStatus status) {
+    switch (status) {
+        case ConvergenceStatus::NotRun: return "NotRun";
+        case ConvergenceStatus::Converged: return "Converged";
+        case ConvergenceStatus::FailedToConverge: return "FailedToConverge";
+        case ConvergenceStatus::MissingLeafTemperature: return "MissingLeafTemperature";
+        case ConvergenceStatus::MissingCalibrationProfile: return "MissingCalibrationProfile";
+        case ConvergenceStatus::NegativeVPD: return "NegativeVPD";
+        case ConvergenceStatus::MissingGasExchangeProfile: return "MissingGasExchangeProfile";
+        case ConvergenceStatus::MissingSubstrateHydraulicProfile: return "MissingSubstrateHydraulicProfile";
+        case ConvergenceStatus::MissingHydraulicStressProfile: return "MissingHydraulicStressProfile";
+        case ConvergenceStatus::HydraulicStateUnavailable: return "HydraulicStateUnavailable";
+        case ConvergenceStatus::MissingLeafVPD: return "MissingLeafVPD";
+        case ConvergenceStatus::MissingAirflow: return "MissingAirflow";
+        case ConvergenceStatus::MissingLeafCharacteristicDimension: return "MissingLeafCharacteristicDimension";
+        case ConvergenceStatus::MissingEffectiveTranspiringLeafArea: return "MissingEffectiveTranspiringLeafArea";
+        case ConvergenceStatus::MissingHydraulicBeta: return "MissingHydraulicBeta";
+        case ConvergenceStatus::UnsupportedBoundaryLayerRegime: return "UnsupportedBoundaryLayerRegime";
+        default: return "Unknown";
+    }
+}
+
 
 struct GasExchangeState {
     units::AssimilationMicromolesPerSquareMeterSecond net_assimilation{0.0};
     units::IntercellularCO2MicromolesPerMole intercellular_co2{0.0};
     units::StomatalConductanceMolesPerSquareMeterSecond stomatal_conductance{0.0};
+    double g1_reference{0.0};
+    double g1_effective{0.0};
+    std::optional<double> beta_hydraulic;
     ConvergenceStatus status{ConvergenceStatus::NotRun};
     std::string profile_id;
 };
@@ -97,7 +133,8 @@ void solve_coupled_gas_exchange(
     units::CO2MicromolesPerMole ambient_co2,
     units::VPDKPa leaf_to_air_vpd,
     std::optional<units::Celsius> leaf_temperature,
-    units::AtmosphericPressureKPa pressure
+    units::AtmosphericPressureKPa pressure,
+    std::optional<double> beta_hydraulic = std::nullopt
 );
 
 } // namespace cannaville::gasexchange

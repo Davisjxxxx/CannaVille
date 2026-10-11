@@ -39,6 +39,9 @@ BoundaryLayerConductance calculate_boundary_layer_conductance(
 );
 
 struct TranspirationResult {
+    // A zero flux is a valid physical result only when this flag is true.
+    // False means no authoritative transpiration calculation was available.
+    bool available{false};
     double flux_mol_m2_s{0.0};
     double total_conductance_mol_m2_s{0.0};
     double leaf_air_vapor_gradient_mol_mol{0.0};

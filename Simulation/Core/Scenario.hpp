@@ -27,13 +27,36 @@ struct ScenarioRoomDefinition {
     std::vector<ScenarioCellDefinition> cells;
 };
 
+struct ScenarioRootZoneDefinition {
+    std::string id;
+    std::string type; // "Substrate" or "Reservoir"
+    units::VolumeCubicMeters substrate_bulk_volume{};
+    std::optional<units::VolumeCubicMeters> max_stored_water;
+    units::VolumeCubicMeters initial_water_volume{};
+    std::optional<std::string> substrate_hydraulic_profile_id;
+    std::optional<std::string> hydraulic_stress_transfer_profile_id;
+    std::optional<bool> explicit_unrestricted_water_access;
+};
+
 struct ScenarioPlantDefinition {
     std::string id;
     std::string room_id;
     std::string cultivar_id;
+    std::string root_zone_id;
     units::Meters x;
     units::Meters y;
     units::Meters z;
+    std::optional<std::string> gas_exchange_profile_id;
+    std::optional<double> effective_transpiring_leaf_area_m2;
+    std::optional<double> leaf_characteristic_dimension_m;
+};
+
+struct ScenarioWaterEvent {
+    std::string id;
+    units::Seconds timestamp;
+    std::string root_zone_id;
+    std::string type;
+    units::VolumeCubicMeters amount{};
 };
 
 struct Scenario {
@@ -42,7 +65,9 @@ struct Scenario {
     std::string simulation_version;
     units::Seconds fixed_timestep;
     std::vector<ScenarioRoomDefinition> rooms;
+    std::vector<ScenarioRootZoneDefinition> root_zones;
     std::vector<ScenarioPlantDefinition> plants;
+    std::vector<ScenarioWaterEvent> water_events;
 
     static Scenario load_json(std::string_view json_text);
     std::vector<std::string> validate() const;

@@ -138,6 +138,10 @@ TranspirationResult calculate_transpiration(
     if (delta_w < 0.0) {
         result.status = "condensation";
     }
+
+    // The flux, including a genuine zero, is authoritative only after all
+    // required conductance and pressure inputs have been validated.
+    result.available = true;
     
     return result;
 }

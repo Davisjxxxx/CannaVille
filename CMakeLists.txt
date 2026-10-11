@@ -16,6 +16,7 @@ add_library(cannaville_sim
     Simulation/GasExchange/GasExchange.cpp
     Simulation/Transpiration/Transpiration.cpp
     Simulation/RootZone/RootZoneWater.cpp
+    Simulation/RootZone/HydraulicLimitation.cpp
 )
 
 target_include_directories(cannaville_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -54,6 +54,12 @@ requested duration
 
 The current state serializer uses ordered JSON object keys and stable array order. The CLI emits a time-series CSV and a final state hash for operational comparison. Floating-point portability beyond the supported compiler/platform contract must be established before cross-platform bitwise claims are made.
 
+## Root-zone conservation output
+
+The root-zone CSV exposes one cumulative ledger. `conservation_initial_storage_m3` is the persistent baseline, and `current_storage_m3` is the current inventory. Cumulative inputs and outputs are emitted once each; requested plant withdrawal is reconstructed as `cumulative_realized_withdrawal_m3 + cumulative_unmet_demand_m3` when needed. `conservation_residual_m3` is independently recomputable from the emitted columns.
+
+Transpiration output is valid only when its integrated status is available. A converged gas-exchange solve does not authorize a transpiration flux when boundary-layer conductance is unavailable; unavailable transpiration fields are blank, while an available calculated zero remains numeric.
+
 ## Current intentionally inert behavior
 
 - fixed-step advancement changes only clock and historical elapsed state

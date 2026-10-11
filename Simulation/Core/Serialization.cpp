@@ -14,8 +14,18 @@ namespace {
 json::Value number(double value) { return json::Value(value); }
 json::Value string_value(const std::string& value) { return json::Value(value); }
 json::Value unsigned_value(std::uint64_t value) { return json::Value(std::to_string(value)); }
-json::Value optional_number(const std::optional<units::Celsius>& value) {
+template <typename T>
+json::Value optional_number(const std::optional<T>& value) {
     return value.has_value() ? number(value->value) : json::Value(nullptr);
+}
+json::Value optional_number(const std::optional<double>& value) {
+    return value.has_value() ? number(*value) : json::Value(nullptr);
+}
+json::Value optional_string(const std::optional<std::string>& value) {
+    return value.has_value() ? string_value(*value) : json::Value(nullptr);
+}
+json::Value optional_bool(const std::optional<bool>& value) {
+    return value.has_value() ? json::Value(*value) : json::Value(nullptr);
 }
 
 double number_field(const json::Value& object, std::string_view key) {
@@ -82,7 +92,7 @@ json::Value environment_json(const environment::EnvironmentState& value) {
         {"relative_humidity_percent", number(value.relative_humidity.value)},
         {"atmospheric_pressure_kpa", number(value.atmospheric_pressure.value)},
         {"co2_umol_per_mol", number(value.carbon_dioxide.value)},
-        {"airflow_m_per_s", number(value.airflow.value)},
+        {"airflow_m_per_s", optional_number(value.airflow)},
         {"cell_height_m", number(value.cell_height.value)},
         {"leaf_temperature_c", optional_number(value.leaf_temperature)},
         {"saturation_vapor_pressure_kpa", number(value.saturation_vapor_pressure.value)},
@@ -98,7 +108,12 @@ void read_environment(const json::Value& object, environment::EnvironmentState& 
     value.relative_humidity.value = number_field(object, "relative_humidity_percent");
     value.atmospheric_pressure.value = number_field(object, "atmospheric_pressure_kpa");
     value.carbon_dioxide.value = number_field(object, "co2_umol_per_mol");
-    value.airflow.value = number_field(object, "airflow_m_per_s");
+    const json::Value& airflow = object.require("airflow_m_per_s");
+    if (airflow.is_null()) {
+        value.airflow.reset();
+    } else {
+        value.airflow = units::AirflowMetersPerSecond{airflow.as_number()};
+    }
     value.cell_height.value = number_field(object, "cell_height_m");
     const json::Value& leaf_temperature = object.require("leaf_temperature_c");
     if (leaf_temperature.is_null()) {
@@ -176,6 +191,7 @@ json::Value root_zone_json(const rootzone::RootZoneState& value) {
     }
     
     // State
+    obj["interval_start_water_volume_m3"] = number(value.interval_start_water_volume.value);
     obj["current_water_volume_m3"] = number(value.current_water_volume.value);
     
     if (value.volumetric_water_content.has_value()) {
@@ -192,6 +208,9 @@ json::Value root_zone_json(const rootzone::RootZoneState& value) {
     obj["cumulative_drainage_discharge_m3"] = number(value.cumulative_drainage_discharge.value);
     obj["cumulative_evaporation_m3"] = number(value.cumulative_evaporation.value);
     obj["cumulative_unmet_demand_m3"] = number(value.cumulative_unmet_demand.value);
+    if (value.substrate_hydraulic_profile_id) obj["substrate_hydraulic_profile_id"] = string_value(*value.substrate_hydraulic_profile_id);
+    if (value.hydraulic_stress_transfer_profile_id) obj["hydraulic_stress_transfer_profile_id"] = string_value(*value.hydraulic_stress_transfer_profile_id);
+    if (value.explicit_unrestricted_water_access) obj["explicit_unrestricted_water_access"] = json::Value(*value.explicit_unrestricted_water_access);
     
     // Legacy placeholders
     obj["root_zone_temperature_c"] = number(value.root_zone_temperature.value);
@@ -215,6 +234,8 @@ void read_root_zone(const json::Value& object, rootzone::RootZoneState& value) {
         value.max_stored_water = std::nullopt;
     }
     
+    if (auto* v = object.find("interval_start_water_volume_m3")) value.interval_start_water_volume.value = v->as_number();
+    else if (auto* c = object.find("current_water_volume_m3")) value.interval_start_water_volume.value = c->as_number();
     if (auto* v = object.find("current_water_volume_m3")) value.current_water_volume.value = v->as_number();
     
     if (auto* v = object.find("volumetric_water_content_m3_m3")) {
@@ -236,6 +257,10 @@ void read_root_zone(const json::Value& object, rootzone::RootZoneState& value) {
     value.cumulative_evaporation.value = object.find("cumulative_evaporation_m3") ? object.find("cumulative_evaporation_m3")->as_number() : 0.0;
     value.cumulative_unmet_demand.value = object.find("cumulative_unmet_demand_m3") ? object.find("cumulative_unmet_demand_m3")->as_number() : 0.0;
     
+    if (auto* v = object.find("substrate_hydraulic_profile_id"); v && v->is_string()) value.substrate_hydraulic_profile_id = v->as_string();
+    if (auto* v = object.find("hydraulic_stress_transfer_profile_id"); v && v->is_string()) value.hydraulic_stress_transfer_profile_id = v->as_string();
+    if (auto* v = object.find("explicit_unrestricted_water_access"); v && v->is_boolean()) value.explicit_unrestricted_water_access = v->as_boolean();
+    
     value.root_zone_temperature.value = object.find("root_zone_temperature_c") ? object.find("root_zone_temperature_c")->as_number() : 20.0;
     value.ph.value = object.find("ph") ? object.find("ph")->as_number() : 6.0;
     value.electrical_conductivity.value = object.find("ec_ms_per_cm") ? object.find("ec_ms_per_cm")->as_number() : 1.5;
@@ -256,7 +281,7 @@ json::Value plant_json(const plants::PlantState& plant) {
         })},
         {"sampled_environment", environment_json(plant.sampled_environment)},
         {"sampled_lighting", lighting_json(plant.sampled_lighting)},
-        {"root_zone", root_zone_json(plant.root_zone)},
+        {"root_zone_id", string_value(plant.root_zone_id)},
         {"nutrition", json::Value({
             {"solution_profile_id", string_value(plant.nutrition.solution_profile_id)},
             {"availability_model_initialized", json::Value(plant.nutrition.availability_model_initialized)},
@@ -298,7 +323,18 @@ json::Value plant_json(const plants::PlantState& plant) {
                 {"stomatal_conductance", number(plant.latent.gas_exchange.stomatal_conductance.value)},
                 {"status", number(static_cast<double>(plant.latent.gas_exchange.status))},
                 {"profile_id", string_value(plant.latent.gas_exchange.profile_id)}
-            })}
+            })},
+            {"transpiration", json::Value({
+                {"flux_mol_m2_s", number(plant.latent.transpiration.flux_mol_m2_s)},
+                {"total_conductance_mol_m2_s", number(plant.latent.transpiration.total_conductance_mol_m2_s)},
+                {"leaf_air_vapor_gradient_mol_mol", number(plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol)},
+                {"status", string_value(plant.latent.transpiration.status)}
+            })},
+            {"effective_leaf_area_m2", optional_number(plant.latent.effective_leaf_area_m2)},
+            {"leaf_characteristic_dimension_m", optional_number(plant.latent.leaf_characteristic_dimension_m)},
+            {"requested_water_mol", number(plant.latent.requested_water_mol)},
+            {"realized_water_mol", number(plant.latent.realized_water_mol)},
+            {"unmet_demand_mol", number(plant.latent.unmet_demand_mol)}
         })},
         {"observable", json::Value({
             {"displayed_growth_stage", string_value(stage_to_string(plant.observable.displayed_growth_stage))},
@@ -333,7 +369,19 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     plant.genetics.inheritance_model_initialized = bool_field(genetics, "inheritance_model_initialized");
     read_environment(object.require("sampled_environment"), plant.sampled_environment);
     read_lighting(object.require("sampled_lighting"), plant.sampled_lighting);
-    read_root_zone(object.require("root_zone"), plant.root_zone);
+    
+    const json::Value* rz = object.find("root_zone_id");
+    if (rz != nullptr && rz->is_string()) {
+        plant.root_zone_id = rz->as_string();
+    } else {
+        // Fallback for legacy format that embedded root_zone objects in plants
+        const json::Value* rz_obj = object.find("root_zone");
+        if (rz_obj != nullptr && rz_obj->is_object()) {
+            plant.root_zone_id = string_field(*rz_obj, "id");
+        } else {
+            plant.root_zone_id = "rootzone_" + plant.id;
+        }
+    }
 
     const auto& nutrition = object.require("nutrition");
     plant.nutrition.solution_profile_id = string_field(nutrition, "solution_profile_id");
@@ -371,6 +419,26 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
         plant.latent.gas_exchange.stomatal_conductance.value = number_field(ge, "stomatal_conductance");
         plant.latent.gas_exchange.status = static_cast<gasexchange::ConvergenceStatus>(number_field(ge, "status"));
         plant.latent.gas_exchange.profile_id = string_field(ge, "profile_id");
+    }
+    const auto* trans_ptr = latent.is_object() ? latent.find("transpiration") : nullptr;
+    if (trans_ptr) {
+        const auto& trans = *trans_ptr;
+        plant.latent.transpiration.flux_mol_m2_s = number_field(trans, "flux_mol_m2_s");
+        plant.latent.transpiration.total_conductance_mol_m2_s = number_field(trans, "total_conductance_mol_m2_s");
+        plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol = number_field(trans, "leaf_air_vapor_gradient_mol_mol");
+        plant.latent.transpiration.status = string_field(trans, "status");
+    }
+    if (latent.is_object()) {
+        const auto* el = latent.find("effective_leaf_area_m2");
+        if (el && !el->is_null()) plant.latent.effective_leaf_area_m2 = el->as_number();
+        const auto* lcd = latent.find("leaf_characteristic_dimension_m");
+        if (lcd && !lcd->is_null()) plant.latent.leaf_characteristic_dimension_m = lcd->as_number();
+        const auto* rq = latent.find("requested_water_mol");
+        if (rq) plant.latent.requested_water_mol = rq->as_number();
+        const auto* rl = latent.find("realized_water_mol");
+        if (rl) plant.latent.realized_water_mol = rl->as_number();
+        const auto* ud = latent.find("unmet_demand_mol");
+        if (ud) plant.latent.unmet_demand_mol = ud->as_number();
     }
     const auto& observable = object.require("observable");
     plant.observable.displayed_growth_stage = stage_from_string(string_field(observable, "displayed_growth_stage"));
@@ -438,8 +506,21 @@ void read_room(const json::Value& object, RoomState& room) {
 std::string serialize_state_json(const SimulationState& state) {
     json::Value::Array rooms;
     for (const RoomState& room : state.rooms) rooms.push_back(room_json(room));
+    json::Value::Array root_zones;
+    for (const cannaville::rootzone::RootZoneState& rz : state.root_zones) root_zones.push_back(root_zone_json(rz));
     json::Value::Array plant_values;
     for (const cannaville::plants::PlantState& plant : state.plants) plant_values.push_back(plant_json(plant));
+
+    json::Value::Array water_events;
+    for (const auto& ev : state.water_events) {
+        water_events.push_back(json::Value({
+            {"id", string_value(ev.id)},
+            {"timestamp", number(ev.timestamp.value)},
+            {"root_zone_id", string_value(ev.root_zone_id)},
+            {"type", string_value(ev.type)},
+            {"amount", number(ev.amount.value)}
+        }));
+    }
 
     return json::stringify(json::Value({
         {"state_schema_version", number(1.0)},
@@ -458,7 +539,9 @@ std::string serialize_state_json(const SimulationState& state) {
             {"draws_consumed", unsigned_value(state.stochastic.draws_consumed)},
         })},
         {"rooms", json::Value(std::move(rooms))},
+        {"root_zones", json::Value(std::move(root_zones))},
         {"plants", json::Value(std::move(plant_values))},
+        {"water_events", json::Value(std::move(water_events))}
     }));
 }
 
@@ -487,12 +570,33 @@ SimulationState deserialize_state_json(const std::string& serialized) {
         read_room(value, room);
         state.rooms.push_back(std::move(room));
     }
+    const json::Value* root_zones = root.find("root_zones");
+    if (root_zones != nullptr) {
+        if (!root_zones->is_array()) throw json::ParseError("serialized root_zones must be an array");
+        for (const auto& value : root_zones->as_array()) {
+            cannaville::rootzone::RootZoneState rz;
+            read_root_zone(value, rz);
+            state.root_zones.push_back(std::move(rz));
+        }
+    }
     const auto& plants = root.require("plants");
     if (!plants.is_array()) throw json::ParseError("serialized plants must be an array");
     for (const auto& value : plants.as_array()) {
         plants::PlantState plant;
         read_plant(value, plant);
         state.plants.push_back(std::move(plant));
+    }
+    const json::Value* events = root.find("water_events");
+    if (events != nullptr && events->is_array()) {
+        for (const auto& ev_val : events->as_array()) {
+            ScenarioWaterEvent ev;
+            ev.id = string_field(ev_val, "id");
+            ev.timestamp.value = number_field(ev_val, "timestamp");
+            ev.root_zone_id = string_field(ev_val, "root_zone_id");
+            ev.type = string_field(ev_val, "type");
+            ev.amount.value = number_field(ev_val, "amount");
+            state.water_events.push_back(std::move(ev));
+        }
     }
     return state;
 }
