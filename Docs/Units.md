@@ -20,6 +20,16 @@ The simulation uses SI-oriented units internally. Every biological or environmen
 | EC | millisiemens per centimetre | `_ms_per_cm` |
 | Substrate moisture | fraction | `_fraction` |
 | Mass | grams | `_g`, `units::MassGrams` |
+| Incident/absorbed radiation and heat flux | watts per square metre | `_w_m2` |
+| Transpiration flux | moles H2O per square metre per second | `_mol_m2_s` |
+| Leaf energy conductance | metres per second | `_m_s` |
+
+P1B.5 uses one common per-area basis: `projected_one_sided_leaf_area`. All leaf
+energy fluxes (`R_sw_abs`, `R_lw_net`, `H`, `LE`) and P1B.4.1 transpiration flux
+are normalized to projected one-sided leaf area. The configured `surface_factor`
+may scale radiation and sensible heat for the selected surface exchange geometry;
+it must never multiply the transpiration flux or the effective whole-plant leaf
+area used for water withdrawal.
 
 ## Rules
 

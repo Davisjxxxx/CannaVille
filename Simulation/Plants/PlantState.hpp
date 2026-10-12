@@ -12,6 +12,7 @@
 #include "Simulation/RootZone/RootZoneState.hpp"
 #include "Simulation/Treatments/TreatmentState.hpp"
 #include "Simulation/GasExchange/GasExchange.hpp"
+#include "Simulation/LeafEnergy/LeafEnergy.hpp"
 
 #include <cstdint>
 #include <string>
@@ -42,6 +43,7 @@ struct PlantLatentState {
     gasexchange::GasExchangeState gas_exchange;
     transpiration::TranspirationResult transpiration;
     transpiration::BoundaryLayerConductance boundary_layer;
+    leafenergy::LeafEnergyState leaf_energy;
     std::optional<double> effective_leaf_area_m2;
     std::optional<double> leaf_characteristic_dimension_m;
     double requested_water_mol{0.0};
@@ -88,6 +90,7 @@ struct PlantState {
     PlantDerivedState derived;
     PlantHistoryState history;
     PlantStochasticState stochastic;
+    leafenergy::LeafEnergyProfile leaf_energy_profile;
 };
 
 } // namespace cannaville::plants

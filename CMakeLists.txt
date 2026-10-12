@@ -15,6 +15,7 @@ add_library(cannaville_sim
     Simulation/Lighting/LightingSystem.cpp
     Simulation/GasExchange/GasExchange.cpp
     Simulation/Transpiration/Transpiration.cpp
+    Simulation/LeafEnergy/LeafEnergy.cpp
     Simulation/RootZone/RootZoneWater.cpp
     Simulation/RootZone/HydraulicLimitation.cpp
 )
@@ -33,5 +34,12 @@ target_link_libraries(cannaville-sim PRIVATE cannaville_sim)
 add_executable(cannaville-tests Tests/SimulationTests.cpp)
 target_link_libraries(cannaville-tests PRIVATE cannaville_sim)
 
+add_executable(cannaville-p1b5-tests Tests/LeafEnergyTests.cpp)
+target_link_libraries(cannaville-p1b5-tests PRIVATE cannaville_sim)
+
+add_executable(cannaville-p1b5-benchmark Tools/P1B5Benchmark.cpp)
+target_link_libraries(cannaville-p1b5-benchmark PRIVATE cannaville_sim)
+
 enable_testing()
 add_test(NAME cannaville-tests COMMAND cannaville-tests)
+add_test(NAME cannaville-p1b5-tests COMMAND cannaville-p1b5-tests)

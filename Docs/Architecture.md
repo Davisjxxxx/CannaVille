@@ -60,6 +60,53 @@ The root-zone CSV exposes one cumulative ledger. `conservation_initial_storage_m
 
 Transpiration output is valid only when its integrated status is available. A converged gas-exchange solve does not authorize a transpiration flux when boundary-layer conductance is unavailable; unavailable transpiration fields are blank, while an available calculated zero remains numeric.
 
+## P1B.5 leaf energy boundary
+
+P1B.4.1 hydraulic state is resolved once at the beginning of each fixed-forcing
+segment. P1B.5 then performs a steady-state, single-leaf energy solve using that
+fixed beta value:
+
+```text
+beginning root/hydraulic state
+  -> trial leaf temperature
+  -> leaf VPD
+  -> existing FvCB/Medlyn gas exchange
+  -> shared heat/vapor boundary layer
+  -> existing transpiration flux
+  -> latent + sensible + longwave + explicit shortwave balance
+  -> deterministic bisection
+  -> final gas exchange/transpiration
+  -> existing water request/allocation
+```
+
+All P1B.5 per-area heat and water-vapor fluxes use the common
+`projected_one_sided_leaf_area` basis. `surface_factor` applies only to configured
+radiation and sensible-heat exchange; it never multiplies the P1B.4.1 transpiration
+flux or whole-plant effective leaf area.
+
+Leaf temperature has three explicit modes: `EXTERNAL_LEAF_TEMPERATURE` preserves a
+supplied measurement and bypasses the solver, `SOLVED_LEAF_ENERGY_BALANCE` requires
+explicit incident shortwave energy and radiative-surroundings temperature, and
+`UNAVAILABLE` produces no authoritative leaf VPD/transpiration/water withdrawal.
+PPFD is a separate horticultural measurement and is never converted to shortwave
+energy by default.
+
+The solver is steady-state only (`S = 0`), bounded by numerical policy, and fails
+explicitly for unavailable inputs, unsupported boundary-layer flow, no bracket,
+non-finite residuals, or iteration exhaustion. It does not mutate root-zone state
+during trial evaluations. Exact water/light/day boundaries remain the only segment
+boundaries. Segment duration is diagnostic context; a steady-state result is not a
+transient leaf-temperature prediction. The coupled root search also does not trial
+below the ambient dew-point boundary because the accepted Medlyn/FvCB model has no
+authoritative negative-VPD stomatal solution; the direct P1B.4.1 transpiration path
+still preserves valid condensation as negative latent heat and never as negative
+plant withdrawal.
+
+P1B.5 is the last planned foundational physical-physiology subsystem. After its
+single closure review, the roadmap pivots to P2 — Plant Growth and Gameplay
+Consequence Layer. No growth, stress, yield, quality, pest, disease, or treatment
+model is part of this boundary.
+
 ## Current intentionally inert behavior
 
 - fixed-step advancement changes only clock and historical elapsed state

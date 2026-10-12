@@ -65,8 +65,59 @@ environment::EnvironmentState parse_environment(const json::Value& object) {
     if (air_velocity != nullptr && !air_velocity->is_null()) {
         state.airflow = units::AirflowMetersPerSecond{air_velocity->as_number()};
     }
+    const json::Value* shortwave = object.find("incident_shortwave_w_m2");
+    if (shortwave != nullptr && !shortwave->is_null()) {
+        if (!shortwave->is_number() || !std::isfinite(shortwave->as_number())) {
+            throw json::ParseError("incident_shortwave_w_m2 must be a finite number or null");
+        }
+        state.incident_shortwave_w_m2 = shortwave->as_number();
+    }
+    const json::Value* radiative = object.find("radiative_surroundings_temperature_c");
+    if (radiative != nullptr && !radiative->is_null()) {
+        if (!radiative->is_number() || !std::isfinite(radiative->as_number())) {
+            throw json::ParseError("radiative_surroundings_temperature_c must be a finite number or null");
+        }
+        state.radiative_surroundings_temperature = units::Celsius{radiative->as_number()};
+    }
     environment::derive_physical_state(state);
     return state;
+}
+
+void parse_leaf_energy_profile(const json::Value& plant, leafenergy::LeafEnergyProfile& profile) {
+    const json::Value* mode = plant.find("leaf_temperature_mode");
+    if (mode != nullptr) {
+        if (!mode->is_string()) throw json::ParseError("leaf_temperature_mode must be a string");
+        profile.temperature_mode = leafenergy::leaf_temperature_mode_from_string(mode->as_string());
+    }
+    const json::Value* profile_value = plant.find("leaf_energy_profile");
+    if (profile_value == nullptr) return;
+    require_object(*profile_value, "leaf_energy_profile");
+    const json::Value& object = *profile_value;
+    profile.profile_id = require_string(object, "profile_id");
+    const json::Value* model_version = object.find("model_version");
+    if (model_version != nullptr) profile.model_version = require_string(object, "model_version");
+    const json::Value* profile_mode = object.find("leaf_temperature_mode");
+    if (profile_mode != nullptr) {
+        if (!profile_mode->is_string()) throw json::ParseError("leaf_energy_profile leaf_temperature_mode must be a string");
+        profile.temperature_mode = leafenergy::leaf_temperature_mode_from_string(profile_mode->as_string());
+    }
+    profile.shortwave_absorptance = require_number(object, "shortwave_absorptance");
+    profile.longwave_emissivity = require_number(object, "longwave_emissivity");
+    profile.surface_factor = require_number(object, "surface_factor");
+    profile.area_basis = leafenergy::area_basis_from_string(require_string(object, "area_basis"));
+    profile.solver_min_temperature_c = require_number(object, "solver_min_temperature_c");
+    profile.solver_max_temperature_c = require_number(object, "solver_max_temperature_c");
+    profile.air_relative_bracket_k = require_number(object, "air_relative_bracket_k");
+    profile.temperature_tolerance_k = require_number(object, "temperature_tolerance_k");
+    profile.residual_tolerance_w_m2 = require_number(object, "residual_tolerance_w_m2");
+    const std::int64_t iterations = require_integer(object, "max_iterations");
+    if (iterations <= 0) throw json::ParseError("leaf_energy_profile max_iterations must be positive");
+    profile.max_iterations = static_cast<std::uint32_t>(iterations);
+    profile.source = require_string(object, "source");
+    profile.evidence_classification = require_string(object, "evidence_classification");
+    profile.calibration_status = require_string(object, "calibration_status");
+    profile.valid_domain = require_string(object, "valid_domain");
+    profile.is_configured = true;
 }
 
 lighting::LightingSchedule parse_lighting_schedule(const json::Value& object) {
@@ -79,6 +130,13 @@ lighting::LightingSchedule parse_lighting_schedule(const json::Value& object) {
         segment.start_of_day.value = require_number(segment_value, "start_seconds");
         segment.end_of_day.value = require_number(segment_value, "end_seconds");
         segment.ppfd.value = require_number(segment_value, "ppfd_umol_per_m2_s");
+        const json::Value* shortwave = segment_value.find("incident_shortwave_w_m2");
+        if (shortwave != nullptr && !shortwave->is_null()) {
+            if (!shortwave->is_number() || !std::isfinite(shortwave->as_number()) || shortwave->as_number() < 0.0) {
+                throw json::ParseError("lighting incident_shortwave_w_m2 must be finite and non-negative");
+            }
+            segment.incident_shortwave_w_m2 = shortwave->as_number();
+        }
         schedule.segments.push_back(segment);
     }
     const std::vector<std::string> errors = lighting::validate_schedule(schedule);
@@ -179,6 +237,7 @@ Scenario Scenario::load_json(std::string_view json_text) {
         if (etl) definition.effective_transpiring_leaf_area_m2 = etl->as_number();
         const json::Value* lcd = plant.find("leaf_characteristic_dimension_m");
         if (lcd) definition.leaf_characteristic_dimension_m = lcd->as_number();
+        parse_leaf_energy_profile(plant, definition.leaf_energy_profile);
         scenario.plants.push_back(std::move(definition));
     }
 
@@ -263,6 +322,14 @@ std::vector<std::string> Scenario::validate() const {
             if (!cell.environment.physics_available) {
                 errors.push_back("cell " + cell.id + " has no validated physical environment state");
             }
+            if (cell.environment.incident_shortwave_w_m2.has_value() &&
+                (!std::isfinite(*cell.environment.incident_shortwave_w_m2) || *cell.environment.incident_shortwave_w_m2 < 0.0)) {
+                errors.push_back("cell " + cell.id + " incident_shortwave_w_m2 must be finite and non-negative");
+            }
+            if (cell.environment.radiative_surroundings_temperature.has_value() &&
+                !std::isfinite(cell.environment.radiative_surroundings_temperature->value)) {
+                errors.push_back("cell " + cell.id + " radiative_surroundings_temperature_c must be finite");
+            }
             const auto schedule_errors = lighting::validate_schedule(cell.lighting_schedule);
             errors.insert(errors.end(), schedule_errors.begin(), schedule_errors.end());
         }
@@ -321,6 +388,31 @@ std::vector<std::string> Scenario::validate() const {
         }
         if (!std::isfinite(plant.z.value) || plant.z.value < 0.0) {
             errors.push_back("plant " + plant.id + " z_m must not be negative");
+        }
+        if (plant.effective_transpiring_leaf_area_m2.has_value() &&
+            (!std::isfinite(*plant.effective_transpiring_leaf_area_m2) || *plant.effective_transpiring_leaf_area_m2 <= 0.0)) {
+            errors.push_back("plant " + plant.id + " effective_transpiring_leaf_area_m2 must be finite and positive");
+        }
+        if (plant.leaf_characteristic_dimension_m.has_value() &&
+            (!std::isfinite(*plant.leaf_characteristic_dimension_m) || *plant.leaf_characteristic_dimension_m <= 0.0)) {
+            errors.push_back("plant " + plant.id + " leaf_characteristic_dimension_m must be finite and positive");
+        }
+        if (plant.leaf_energy_profile.is_configured) {
+            const auto& profile = plant.leaf_energy_profile;
+            if (!std::isfinite(profile.shortwave_absorptance) || profile.shortwave_absorptance < 0.0 || profile.shortwave_absorptance > 1.0) {
+                errors.push_back("plant " + plant.id + " leaf-energy shortwave_absorptance must be within [0,1]");
+            }
+            if (!std::isfinite(profile.longwave_emissivity) || profile.longwave_emissivity <= 0.0 || profile.longwave_emissivity > 1.0) {
+                errors.push_back("plant " + plant.id + " leaf-energy longwave_emissivity must be within (0,1]");
+            }
+            if (!std::isfinite(profile.surface_factor) || profile.surface_factor <= 0.0) {
+                errors.push_back("plant " + plant.id + " leaf-energy surface_factor must be positive");
+            }
+            if (!std::isfinite(profile.solver_min_temperature_c) || !std::isfinite(profile.solver_max_temperature_c) ||
+                profile.solver_min_temperature_c >= profile.solver_max_temperature_c) {
+                errors.push_back("plant " + plant.id + " leaf-energy temperature bounds are invalid");
+            }
+            if (profile.max_iterations == 0) errors.push_back("plant " + plant.id + " leaf-energy max_iterations must be positive");
         }
     }
     for (const ScenarioWaterEvent& ev : water_events) {

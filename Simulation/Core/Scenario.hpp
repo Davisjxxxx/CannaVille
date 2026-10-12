@@ -3,6 +3,7 @@
 #include "Simulation/Core/Units.hpp"
 #include "Simulation/Environment/EnvironmentState.hpp"
 #include "Simulation/Lighting/LightingState.hpp"
+#include "Simulation/LeafEnergy/LeafEnergy.hpp"
 
 #include <cstdint>
 #include <string>
@@ -49,6 +50,7 @@ struct ScenarioPlantDefinition {
     std::optional<std::string> gas_exchange_profile_id;
     std::optional<double> effective_transpiring_leaf_area_m2;
     std::optional<double> leaf_characteristic_dimension_m;
+    leafenergy::LeafEnergyProfile leaf_energy_profile;
 };
 
 struct ScenarioWaterEvent {

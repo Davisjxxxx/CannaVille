@@ -14,6 +14,8 @@ struct EnvironmentState {
     std::optional<units::AirflowMetersPerSecond> airflow;
     units::Meters cell_height{};
     std::optional<units::Celsius> leaf_temperature;
+    std::optional<double> incident_shortwave_w_m2;
+    std::optional<units::Celsius> radiative_surroundings_temperature;
 
     // Derived physical measurements. They are unavailable until the input
     // measurements have passed validation and the registered models run.

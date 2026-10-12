@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "scenario_id": "p1b5-leaf-energy-smoke",
+  "simulation_version": "0.6.0-p1b5",
+  "fixed_timestep_seconds": 900,
+  "rooms": [
+    {
+      "id": "room-p1b5",
+      "width_m": 2,
+      "depth_m": 2,
+      "cell_size_m": 2,
+      "cells": [
+        {
+          "id": "cell-p1b5",
+          "center_x_m": 1,
+          "center_y_m": 1,
+          "environment": {
+            "air_temperature_c": 25,
+            "relative_humidity_percent": 50,
+            "atmospheric_pressure_kpa": 101.325,
+            "co2_umol_per_mol": 400,
+            "airflow_m_per_s": 1,
+            "incident_shortwave_w_m2": 500,
+            "radiative_surroundings_temperature_c": 25
+          },
+          "lighting_schedule": [
+            {"start_seconds": 0, "end_seconds": 21600, "ppfd_umol_per_m2_s": 1000, "incident_shortwave_w_m2": 500},
+            {"start_seconds": 21600, "end_seconds": 86400, "ppfd_umol_per_m2_s": 0, "incident_shortwave_w_m2": 0}
+          ]
+        }
+      ]
+    }
+  ],
+  "root_zones": [
+    {"id": "rz-p1b5", "type": "Reservoir", "max_stored_water_m3": 0.01, "initial_water_volume_m3": 0.01, "explicit_unrestricted_water_access": true}
+  ],
+  "plants": [
+    {
+      "id": "plant-p1b5",
+      "room_id": "room-p1b5",
+      "cultivar_id": "synthetic-fixture",
+      "root_zone_id": "rz-p1b5",
+      "x_m": 1,
+      "y_m": 1,
+      "z_m": 0,
+      "gas_exchange_profile_id": "synthetic_vegetative_test",
+      "effective_transpiring_leaf_area_m2": 1,
+      "leaf_characteristic_dimension_m": 0.1,
+      "leaf_temperature_mode": "SOLVED_LEAF_ENERGY_BALANCE",
+      "leaf_energy_profile": {
+        "profile_id": "synthetic_leaf_energy_test",
+        "model_version": "leaf_energy_balance.steady_state.v1",
+        "leaf_temperature_mode": "SOLVED_LEAF_ENERGY_BALANCE",
+        "shortwave_absorptance": 0.5,
+        "longwave_emissivity": 0.97,
+        "surface_factor": 1,
+        "area_basis": "projected_one_sided_leaf_area",
+        "solver_min_temperature_c": -40,
+        "solver_max_temperature_c": 100,
+        "air_relative_bracket_k": 80,
+        "temperature_tolerance_k": 0.001,
+        "residual_tolerance_w_m2": 0.01,
+        "max_iterations": 32,
+        "source": "synthetic_fixture",
+        "evidence_classification": "SYNTHETIC_TEST_VALUE",
+        "calibration_status": "SYNTHETIC_TEST_VALUE",
+        "valid_domain": "engineering fixture; not biologically calibrated"
+      }
+    }
+  ]
+}
