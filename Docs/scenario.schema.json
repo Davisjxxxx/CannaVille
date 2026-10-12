@@ -40,7 +40,10 @@
                     "relative_humidity_percent": {"type": "number", "minimum": 0, "maximum": 100},
                     "atmospheric_pressure_kpa": {"type": "number", "exclusiveMinimum": 0},
                     "co2_umol_per_mol": {"type": "number", "minimum": 0},
-                    "leaf_temperature_c": {"type": ["number", "null"]}
+                    "leaf_temperature_c": {"type": ["number", "null"]},
+                    "airflow_m_per_s": {"type": ["number", "null"], "minimum": 0},
+                    "incident_shortwave_w_m2": {"type": ["number", "null"], "minimum": 0},
+                    "radiative_surroundings_temperature_c": {"type": ["number", "null"]}
                   }
                 },
                 "lighting_schedule": {
@@ -52,7 +55,8 @@
                     "properties": {
                       "start_seconds": {"type": "number", "minimum": 0, "maximum": 86400},
                       "end_seconds": {"type": "number", "minimum": 0, "maximum": 86400},
-                      "ppfd_umol_per_m2_s": {"type": "number", "minimum": 0}
+                      "ppfd_umol_per_m2_s": {"type": "number", "minimum": 0},
+                      "incident_shortwave_w_m2": {"type": ["number", "null"], "minimum": 0}
                     }
                   }
                 }
@@ -74,7 +78,35 @@
           "cultivar_id": {"type": "string", "minLength": 1},
           "x_m": {"type": "number", "minimum": 0},
           "y_m": {"type": "number", "minimum": 0},
-          "z_m": {"type": "number", "minimum": 0}
+          "z_m": {"type": "number", "minimum": 0},
+          "gas_exchange_profile_id": {"type": "string", "minLength": 1},
+          "effective_transpiring_leaf_area_m2": {"type": "number", "exclusiveMinimum": 0},
+          "leaf_characteristic_dimension_m": {"type": "number", "exclusiveMinimum": 0},
+          "leaf_temperature_mode": {"enum": ["EXTERNAL_LEAF_TEMPERATURE", "SOLVED_LEAF_ENERGY_BALANCE", "UNAVAILABLE"]},
+          "leaf_energy_profile": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["profile_id", "shortwave_absorptance", "longwave_emissivity", "surface_factor", "area_basis", "solver_min_temperature_c", "solver_max_temperature_c", "air_relative_bracket_k", "temperature_tolerance_k", "residual_tolerance_w_m2", "max_iterations", "source", "evidence_classification", "calibration_status", "valid_domain"],
+            "properties": {
+              "profile_id": {"type": "string", "minLength": 1},
+              "model_version": {"type": "string", "minLength": 1},
+              "leaf_temperature_mode": {"enum": ["EXTERNAL_LEAF_TEMPERATURE", "SOLVED_LEAF_ENERGY_BALANCE", "UNAVAILABLE"]},
+              "shortwave_absorptance": {"type": "number", "minimum": 0, "maximum": 1},
+              "longwave_emissivity": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+              "surface_factor": {"type": "number", "exclusiveMinimum": 0},
+              "area_basis": {"const": "projected_one_sided_leaf_area"},
+              "solver_min_temperature_c": {"type": "number"},
+              "solver_max_temperature_c": {"type": "number"},
+              "air_relative_bracket_k": {"type": "number", "exclusiveMinimum": 0},
+              "temperature_tolerance_k": {"type": "number", "exclusiveMinimum": 0},
+              "residual_tolerance_w_m2": {"type": "number", "exclusiveMinimum": 0},
+              "max_iterations": {"type": "integer", "minimum": 1},
+              "source": {"type": "string", "minLength": 1},
+              "evidence_classification": {"type": "string", "minLength": 1},
+              "calibration_status": {"type": "string", "minLength": 1},
+              "valid_domain": {"type": "string", "minLength": 1}
+            }
+          }
         }
       }
     }

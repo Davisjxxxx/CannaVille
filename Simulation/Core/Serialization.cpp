@@ -95,6 +95,8 @@ json::Value environment_json(const environment::EnvironmentState& value) {
         {"airflow_m_per_s", optional_number(value.airflow)},
         {"cell_height_m", number(value.cell_height.value)},
         {"leaf_temperature_c", optional_number(value.leaf_temperature)},
+        {"incident_shortwave_w_m2", value.incident_shortwave_w_m2.has_value() ? number(*value.incident_shortwave_w_m2) : json::Value(nullptr)},
+        {"radiative_surroundings_temperature_c", optional_number(value.radiative_surroundings_temperature)},
         {"saturation_vapor_pressure_kpa", number(value.saturation_vapor_pressure.value)},
         {"actual_vapor_pressure_kpa", number(value.actual_vapor_pressure.value)},
         {"air_vpd_kpa", number(value.air_vpd.value)},
@@ -122,6 +124,12 @@ void read_environment(const json::Value& object, environment::EnvironmentState& 
         if (!leaf_temperature.is_number()) throw json::ParseError("leaf_temperature_c must be a number or null");
         value.leaf_temperature = units::Celsius{leaf_temperature.as_number()};
     }
+    const json::Value* shortwave = object.find("incident_shortwave_w_m2");
+    if (shortwave == nullptr || shortwave->is_null()) value.incident_shortwave_w_m2.reset();
+    else value.incident_shortwave_w_m2 = number_field(object, "incident_shortwave_w_m2");
+    const json::Value* radiative = object.find("radiative_surroundings_temperature_c");
+    if (radiative == nullptr || radiative->is_null()) value.radiative_surroundings_temperature.reset();
+    else value.radiative_surroundings_temperature = units::Celsius{number_field(object, "radiative_surroundings_temperature_c")};
     value.saturation_vapor_pressure.value = number_field(object, "saturation_vapor_pressure_kpa");
     value.actual_vapor_pressure.value = number_field(object, "actual_vapor_pressure_kpa");
     value.air_vpd.value = number_field(object, "air_vpd_kpa");
@@ -129,6 +137,87 @@ void read_environment(const json::Value& object, environment::EnvironmentState& 
     if (leaf_vpd.is_null()) value.leaf_vpd.reset();
     else value.leaf_vpd = units::VPDKPa{number_field(object, "leaf_vpd_kpa")};
     value.physics_available = bool_field(object, "physics_available");
+}
+
+json::Value leaf_energy_profile_json(const leafenergy::LeafEnergyProfile& profile) {
+    return json::Value({
+        {"profile_id", string_value(profile.profile_id)},
+        {"model_version", string_value(profile.model_version)},
+        {"leaf_temperature_mode", string_value(leafenergy::to_string(profile.temperature_mode))},
+        {"shortwave_absorptance", number(profile.shortwave_absorptance)},
+        {"longwave_emissivity", number(profile.longwave_emissivity)},
+        {"surface_factor", number(profile.surface_factor)},
+        {"area_basis", string_value(leafenergy::to_string(profile.area_basis))},
+        {"solver_min_temperature_c", number(profile.solver_min_temperature_c)},
+        {"solver_max_temperature_c", number(profile.solver_max_temperature_c)},
+        {"air_relative_bracket_k", number(profile.air_relative_bracket_k)},
+        {"temperature_tolerance_k", number(profile.temperature_tolerance_k)},
+        {"residual_tolerance_w_m2", number(profile.residual_tolerance_w_m2)},
+        {"max_iterations", number(static_cast<double>(profile.max_iterations))},
+        {"source", string_value(profile.source)},
+        {"evidence_classification", string_value(profile.evidence_classification)},
+        {"calibration_status", string_value(profile.calibration_status)},
+        {"valid_domain", string_value(profile.valid_domain)},
+        {"is_configured", json::Value(profile.is_configured)},
+    });
+}
+
+void read_leaf_energy_profile(const json::Value& object, leafenergy::LeafEnergyProfile& profile) {
+    profile.profile_id = string_field(object, "profile_id");
+    profile.model_version = string_field(object, "model_version");
+    profile.temperature_mode = leafenergy::leaf_temperature_mode_from_string(string_field(object, "leaf_temperature_mode"));
+    profile.shortwave_absorptance = number_field(object, "shortwave_absorptance");
+    profile.longwave_emissivity = number_field(object, "longwave_emissivity");
+    profile.surface_factor = number_field(object, "surface_factor");
+    profile.area_basis = leafenergy::area_basis_from_string(string_field(object, "area_basis"));
+    profile.solver_min_temperature_c = number_field(object, "solver_min_temperature_c");
+    profile.solver_max_temperature_c = number_field(object, "solver_max_temperature_c");
+    profile.air_relative_bracket_k = number_field(object, "air_relative_bracket_k");
+    profile.temperature_tolerance_k = number_field(object, "temperature_tolerance_k");
+    profile.residual_tolerance_w_m2 = number_field(object, "residual_tolerance_w_m2");
+    profile.max_iterations = static_cast<std::uint32_t>(number_field(object, "max_iterations"));
+    profile.source = string_field(object, "source");
+    profile.evidence_classification = string_field(object, "evidence_classification");
+    profile.calibration_status = string_field(object, "calibration_status");
+    profile.valid_domain = string_field(object, "valid_domain");
+    profile.is_configured = bool_field(object, "is_configured");
+}
+
+json::Value leaf_energy_state_json(const leafenergy::LeafEnergyState& value) {
+    return json::Value({
+        {"leaf_temperature_c", optional_number(value.leaf_temperature)},
+        {"leaf_vpd_kpa", value.leaf_vpd.has_value() ? number(value.leaf_vpd->value) : json::Value(nullptr)},
+        {"absorbed_shortwave_w_m2", value.absorbed_shortwave_w_m2.has_value() ? number(*value.absorbed_shortwave_w_m2) : json::Value(nullptr)},
+        {"net_longwave_w_m2", value.net_longwave_w_m2.has_value() ? number(*value.net_longwave_w_m2) : json::Value(nullptr)},
+        {"sensible_heat_flux_w_m2", value.sensible_heat_flux_w_m2.has_value() ? number(*value.sensible_heat_flux_w_m2) : json::Value(nullptr)},
+        {"latent_heat_flux_w_m2", value.latent_heat_flux_w_m2.has_value() ? number(*value.latent_heat_flux_w_m2) : json::Value(nullptr)},
+        {"energy_residual_w_m2", value.energy_residual_w_m2.has_value() ? number(*value.energy_residual_w_m2) : json::Value(nullptr)},
+        {"solver_iterations", number(static_cast<double>(value.solver_iterations))},
+        {"status", string_value(value.status)},
+        {"source", string_value(value.source)},
+        {"model_version", string_value(value.model_version)},
+    });
+}
+
+void read_optional_leaf_energy_state(const json::Value& object, leafenergy::LeafEnergyState& value) {
+    const json::Value* temperature = object.find("leaf_temperature_c");
+    if (temperature != nullptr && !temperature->is_null()) value.leaf_temperature = units::Celsius{number_field(object, "leaf_temperature_c")};
+    const json::Value* vpd = object.find("leaf_vpd_kpa");
+    if (vpd != nullptr && !vpd->is_null()) value.leaf_vpd = units::VPDKPa{number_field(object, "leaf_vpd_kpa")};
+    const json::Value* sw = object.find("absorbed_shortwave_w_m2");
+    if (sw != nullptr && !sw->is_null()) value.absorbed_shortwave_w_m2 = number_field(object, "absorbed_shortwave_w_m2");
+    const json::Value* lw = object.find("net_longwave_w_m2");
+    if (lw != nullptr && !lw->is_null()) value.net_longwave_w_m2 = number_field(object, "net_longwave_w_m2");
+    const json::Value* sensible = object.find("sensible_heat_flux_w_m2");
+    if (sensible != nullptr && !sensible->is_null()) value.sensible_heat_flux_w_m2 = number_field(object, "sensible_heat_flux_w_m2");
+    const json::Value* latent = object.find("latent_heat_flux_w_m2");
+    if (latent != nullptr && !latent->is_null()) value.latent_heat_flux_w_m2 = number_field(object, "latent_heat_flux_w_m2");
+    const json::Value* residual = object.find("energy_residual_w_m2");
+    if (residual != nullptr && !residual->is_null()) value.energy_residual_w_m2 = number_field(object, "energy_residual_w_m2");
+    if (object.find("solver_iterations") != nullptr) value.solver_iterations = static_cast<std::uint32_t>(number_field(object, "solver_iterations"));
+    if (object.find("status") != nullptr) value.status = string_field(object, "status");
+    if (object.find("source") != nullptr) value.source = string_field(object, "source");
+    if (object.find("model_version") != nullptr) value.model_version = string_field(object, "model_version");
 }
 
 json::Value lighting_json(const lighting::LightingState& value) {
@@ -139,6 +228,7 @@ json::Value lighting_json(const lighting::LightingState& value) {
         {"accumulated_light_on_duration_s", number(value.accumulated_light_on_duration.value)},
         {"accumulated_dark_duration_s", number(value.accumulated_dark_duration.value)},
         {"light_on", json::Value(value.light_on)},
+        {"incident_shortwave_w_m2", value.incident_shortwave_w_m2.has_value() ? number(*value.incident_shortwave_w_m2) : json::Value(nullptr)},
     });
 }
 
@@ -149,6 +239,8 @@ void read_lighting(const json::Value& object, lighting::LightingState& value) {
     value.accumulated_light_on_duration.value = number_field(object, "accumulated_light_on_duration_s");
     value.accumulated_dark_duration.value = number_field(object, "accumulated_dark_duration_s");
     value.light_on = bool_field(object, "light_on");
+    const json::Value* shortwave = object.find("incident_shortwave_w_m2");
+    if (shortwave != nullptr && !shortwave->is_null()) value.incident_shortwave_w_m2 = number_field(object, "incident_shortwave_w_m2");
 }
 
 json::Value schedule_json(const lighting::LightingSchedule& schedule) {
@@ -158,6 +250,7 @@ json::Value schedule_json(const lighting::LightingSchedule& schedule) {
             {"start_seconds", number(segment.start_of_day.value)},
             {"end_seconds", number(segment.end_of_day.value)},
             {"ppfd_umol_per_m2_s", number(segment.ppfd.value)},
+            {"incident_shortwave_w_m2", segment.incident_shortwave_w_m2.has_value() ? number(*segment.incident_shortwave_w_m2) : json::Value(nullptr)},
         }));
     }
     return json::Value(std::move(segments));
@@ -171,6 +264,8 @@ lighting::LightingSchedule read_schedule(const json::Value& value) {
         segment.start_of_day.value = number_field(item, "start_seconds");
         segment.end_of_day.value = number_field(item, "end_seconds");
         segment.ppfd.value = number_field(item, "ppfd_umol_per_m2_s");
+        const json::Value* shortwave = item.find("incident_shortwave_w_m2");
+        if (shortwave != nullptr && !shortwave->is_null()) segment.incident_shortwave_w_m2 = number_field(item, "incident_shortwave_w_m2");
         schedule.segments.push_back(segment);
     }
     return schedule;
@@ -282,6 +377,7 @@ json::Value plant_json(const plants::PlantState& plant) {
         {"sampled_environment", environment_json(plant.sampled_environment)},
         {"sampled_lighting", lighting_json(plant.sampled_lighting)},
         {"root_zone_id", string_value(plant.root_zone_id)},
+        {"leaf_energy_profile", leaf_energy_profile_json(plant.leaf_energy_profile)},
         {"nutrition", json::Value({
             {"solution_profile_id", string_value(plant.nutrition.solution_profile_id)},
             {"availability_model_initialized", json::Value(plant.nutrition.availability_model_initialized)},
@@ -321,6 +417,9 @@ json::Value plant_json(const plants::PlantState& plant) {
                 {"net_assimilation", number(plant.latent.gas_exchange.net_assimilation.value)},
                 {"intercellular_co2", number(plant.latent.gas_exchange.intercellular_co2.value)},
                 {"stomatal_conductance", number(plant.latent.gas_exchange.stomatal_conductance.value)},
+                {"g1_reference", number(plant.latent.gas_exchange.g1_reference)},
+                {"g1_effective", number(plant.latent.gas_exchange.g1_effective)},
+                {"beta_hydraulic", plant.latent.gas_exchange.beta_hydraulic.has_value() ? number(*plant.latent.gas_exchange.beta_hydraulic) : json::Value(nullptr)},
                 {"status", number(static_cast<double>(plant.latent.gas_exchange.status))},
                 {"profile_id", string_value(plant.latent.gas_exchange.profile_id)}
             })},
@@ -329,7 +428,9 @@ json::Value plant_json(const plants::PlantState& plant) {
                 {"total_conductance_mol_m2_s", number(plant.latent.transpiration.total_conductance_mol_m2_s)},
                 {"leaf_air_vapor_gradient_mol_mol", number(plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol)},
                 {"status", string_value(plant.latent.transpiration.status)}
+                ,{"available", json::Value(plant.latent.transpiration.available)}
             })},
+            {"leaf_energy", leaf_energy_state_json(plant.latent.leaf_energy)},
             {"effective_leaf_area_m2", optional_number(plant.latent.effective_leaf_area_m2)},
             {"leaf_characteristic_dimension_m", optional_number(plant.latent.leaf_characteristic_dimension_m)},
             {"requested_water_mol", number(plant.latent.requested_water_mol)},
@@ -369,6 +470,8 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     plant.genetics.inheritance_model_initialized = bool_field(genetics, "inheritance_model_initialized");
     read_environment(object.require("sampled_environment"), plant.sampled_environment);
     read_lighting(object.require("sampled_lighting"), plant.sampled_lighting);
+    const json::Value* profile = object.find("leaf_energy_profile");
+    if (profile != nullptr && profile->is_object()) read_leaf_energy_profile(*profile, plant.leaf_energy_profile);
     
     const json::Value* rz = object.find("root_zone_id");
     if (rz != nullptr && rz->is_string()) {
@@ -417,6 +520,9 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
         plant.latent.gas_exchange.net_assimilation.value = number_field(ge, "net_assimilation");
         plant.latent.gas_exchange.intercellular_co2.value = number_field(ge, "intercellular_co2");
         plant.latent.gas_exchange.stomatal_conductance.value = number_field(ge, "stomatal_conductance");
+        if (ge.find("g1_reference") != nullptr) plant.latent.gas_exchange.g1_reference = number_field(ge, "g1_reference");
+        if (ge.find("g1_effective") != nullptr) plant.latent.gas_exchange.g1_effective = number_field(ge, "g1_effective");
+        if (const json::Value* beta = ge.find("beta_hydraulic"); beta != nullptr && !beta->is_null()) plant.latent.gas_exchange.beta_hydraulic = number_field(ge, "beta_hydraulic");
         plant.latent.gas_exchange.status = static_cast<gasexchange::ConvergenceStatus>(number_field(ge, "status"));
         plant.latent.gas_exchange.profile_id = string_field(ge, "profile_id");
     }
@@ -427,6 +533,11 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
         plant.latent.transpiration.total_conductance_mol_m2_s = number_field(trans, "total_conductance_mol_m2_s");
         plant.latent.transpiration.leaf_air_vapor_gradient_mol_mol = number_field(trans, "leaf_air_vapor_gradient_mol_mol");
         plant.latent.transpiration.status = string_field(trans, "status");
+        if (trans.find("available") != nullptr) plant.latent.transpiration.available = bool_field(trans, "available");
+    }
+    const json::Value* leaf_energy_ptr = latent.is_object() ? latent.find("leaf_energy") : nullptr;
+    if (leaf_energy_ptr != nullptr && leaf_energy_ptr->is_object()) {
+        read_optional_leaf_energy_state(*leaf_energy_ptr, plant.latent.leaf_energy);
     }
     if (latent.is_object()) {
         const auto* el = latent.find("effective_leaf_area_m2");

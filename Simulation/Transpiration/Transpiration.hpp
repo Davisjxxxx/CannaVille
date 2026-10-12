@@ -10,6 +10,10 @@ struct AirProperties {
     double kinematic_viscosity{1.51e-5}; // m^2 s^-1
     double vapor_diffusivity{2.42e-5};   // m^2 s^-1
     double molar_density{41.6};          // mol m^-3
+    double air_density_kg_m3{1.18};      // kg m^-3
+    double cp_air_j_kg_k{1005.0};        // J kg^-1 K^-1
+    double prandtl_number{0.71};         // dimensionless
+    double thermal_diffusivity{2.1e-5};  // m^2 s^-1
 };
 
 // Calculate air properties dynamically based on temperature and pressure
@@ -26,6 +30,7 @@ enum class ScientificDomainStatus {
 
 struct BoundaryLayerConductance {
     std::optional<double> value_mol_m2_s{std::nullopt};
+    std::optional<double> value_heat_m_s{std::nullopt};
     ScientificDomainStatus status{ScientificDomainStatus::Valid};
     std::string regime{"uninitialized"};
 };

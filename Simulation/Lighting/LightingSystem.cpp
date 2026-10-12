@@ -11,12 +11,13 @@ namespace {
 struct LightSample {
     double ppfd{0.0};
     bool light_on{false};
+    std::optional<double> incident_shortwave_w_m2;
 };
 
 LightSample sample_at(const LightingSchedule& schedule, double seconds_of_day) {
     for (const LightingScheduleSegment& segment : schedule.segments) {
         if (seconds_of_day >= segment.start_of_day.value && seconds_of_day < segment.end_of_day.value) {
-            return LightSample{segment.ppfd.value, segment.ppfd.value > 0.0};
+            return LightSample{segment.ppfd.value, segment.ppfd.value > 0.0, segment.incident_shortwave_w_m2};
         }
     }
     return LightSample{};
@@ -57,6 +58,10 @@ std::vector<std::string> validate_schedule(const LightingSchedule& schedule) {
         if (!std::isfinite(segment.ppfd.value) || segment.ppfd.value < 0.0) {
             errors.push_back("lighting schedule PPFD must be finite and non-negative");
         }
+        if (segment.incident_shortwave_w_m2.has_value() &&
+            (!std::isfinite(*segment.incident_shortwave_w_m2) || *segment.incident_shortwave_w_m2 < 0.0)) {
+            errors.push_back("lighting incident shortwave energy must be finite and non-negative");
+        }
         for (std::size_t previous_index = 0; previous_index < index; ++previous_index) {
             const LightingScheduleSegment& previous = schedule.segments[previous_index];
             if (segment.start_of_day.value < previous.end_of_day.value &&
@@ -77,6 +82,7 @@ void initialize_state(LightingState& state, const LightingSchedule& schedule, do
     const LightSample sample = sample_at(schedule, seconds_of_day);
     state.ppfd.value = sample.ppfd;
     state.light_on = sample.light_on;
+    state.incident_shortwave_w_m2 = sample.incident_shortwave_w_m2;
 }
 
 void advance_state(LightingState& state,
@@ -103,6 +109,7 @@ void advance_state(LightingState& state,
         const LightSample sample = sample_at(schedule, seconds_of_day + 1e-9);
         state.ppfd.value = sample.ppfd;
         state.light_on = sample.light_on;
+        state.incident_shortwave_w_m2 = sample.incident_shortwave_w_m2;
         state.dli.value += sample.ppfd * segment_duration / 1000000.0;
         if (sample.light_on) {
             state.accumulated_light_on_duration.value += segment_duration;
@@ -119,6 +126,7 @@ void advance_state(LightingState& state,
     const LightSample final_sample = sample_at(schedule, final_seconds_of_day);
     state.ppfd.value = final_sample.ppfd;
     state.light_on = final_sample.light_on;
+    state.incident_shortwave_w_m2 = final_sample.incident_shortwave_w_m2;
 }
 
 } // namespace cannaville::lighting

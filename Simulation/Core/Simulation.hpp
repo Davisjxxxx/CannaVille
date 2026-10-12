@@ -48,6 +48,15 @@ struct SegmentDiagnostic {
     double post_segment_storage_m3{0.0};
     std::string gas_exchange_status;
     std::string transpiration_status;
+    std::optional<double> leaf_temperature_c;
+    std::optional<double> leaf_vpd_kpa;
+    std::optional<double> absorbed_shortwave_w_m2;
+    std::optional<double> net_longwave_w_m2;
+    std::optional<double> sensible_heat_flux_w_m2;
+    std::optional<double> latent_heat_flux_w_m2;
+    std::optional<double> energy_residual_w_m2;
+    std::uint32_t leaf_energy_iterations{0};
+    std::string leaf_energy_status;
 };
 
 class ISimulation {
