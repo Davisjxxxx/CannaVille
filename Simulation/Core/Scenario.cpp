@@ -120,6 +120,56 @@ void parse_leaf_energy_profile(const json::Value& plant, leafenergy::LeafEnergyP
     profile.is_configured = true;
 }
 
+void parse_consequence_profile(const json::Value& plant, consequences::PlantConsequenceProfile& profile) {
+    const json::Value* profile_value = plant.find("consequence_profile");
+    if (profile_value == nullptr) return;
+    require_object(*profile_value, "consequence_profile");
+    const json::Value& object = *profile_value;
+    profile.profile_id = require_string(object, "profile_id");
+    if (object.find("model_version") != nullptr) profile.model_version = require_string(object, "model_version");
+    profile.source = require_string(object, "source");
+    profile.evidence_classification = require_string(object, "evidence_classification");
+    profile.calibration_status = require_string(object, "calibration_status");
+    profile.valid_domain = require_string(object, "valid_domain");
+    const json::Value& stages = object.require("stages");
+    if (!stages.is_array()) throw json::ParseError("consequence_profile stages must be an array");
+    for (const json::Value& stage_value : stages.as_array()) {
+        require_object(stage_value, "consequence stage profile");
+        consequences::StageProfile stage;
+        stage.stage = consequences::development_stage_from_string(require_string(stage_value, "stage"));
+        stage.required_opportunity_s = require_number(stage_value, "required_opportunity_s");
+        stage.assimilation_reference_umol_m2_s = require_number(stage_value, "assimilation_reference_umol_m2_s");
+        if (const json::Value* minimum = stage_value.find("minimum_elapsed_stage_s"); minimum != nullptr && !minimum->is_null()) {
+            stage.minimum_elapsed_stage_s = require_number(stage_value, "minimum_elapsed_stage_s");
+        }
+        if (const json::Value* dark = stage_value.find("minimum_dark_duration_s"); dark != nullptr && !dark->is_null()) {
+            stage.minimum_dark_duration_s = require_number(stage_value, "minimum_dark_duration_s");
+        }
+        profile.stages.push_back(stage);
+    }
+    const auto parse_channel = [&object](const char* name, consequences::ExposureProfile& channel) {
+        const json::Value& value = object.require(name);
+        require_object(value, name);
+        channel.onset = require_number(value, "onset");
+        channel.full = require_number(value, "full");
+        channel.critical = require_number(value, "critical");
+        channel.recovery_rate_per_s = require_number(value, "recovery_rate_per_s");
+        channel.damage_onset = require_number(value, "damage_onset");
+        channel.damage_scale_s = require_number(value, "damage_scale_s");
+    };
+    parse_channel("water", profile.water);
+    parse_channel("thermal", profile.thermal);
+    parse_channel("radiation", profile.radiation);
+    const json::Value& presentation = object.require("presentation");
+    require_object(presentation, "consequence presentation");
+    profile.presentation.stress_onset = require_number(presentation, "stress_onset");
+    profile.presentation.recovery_onset = require_number(presentation, "recovery_onset");
+    profile.presentation.damage_onset = require_number(presentation, "damage_onset");
+    profile.presentation.critical_onset = require_number(presentation, "critical_onset");
+    profile.presentation.thriving_opportunity = require_number(presentation, "thriving_opportunity");
+    profile.is_configured = true;
+}
+
 lighting::LightingSchedule parse_lighting_schedule(const json::Value& object) {
     const json::Value& value = object.require("lighting_schedule");
     if (!value.is_array()) throw json::ParseError("lighting_schedule must be an array");
@@ -238,6 +288,7 @@ Scenario Scenario::load_json(std::string_view json_text) {
         const json::Value* lcd = plant.find("leaf_characteristic_dimension_m");
         if (lcd) definition.leaf_characteristic_dimension_m = lcd->as_number();
         parse_leaf_energy_profile(plant, definition.leaf_energy_profile);
+        parse_consequence_profile(plant, definition.consequence_profile);
         scenario.plants.push_back(std::move(definition));
     }
 
@@ -413,6 +464,11 @@ std::vector<std::string> Scenario::validate() const {
                 errors.push_back("plant " + plant.id + " leaf-energy temperature bounds are invalid");
             }
             if (profile.max_iterations == 0) errors.push_back("plant " + plant.id + " leaf-energy max_iterations must be positive");
+        }
+        if (plant.consequence_profile.is_configured) {
+            for (const std::string& profile_error : consequences::validate_profile(plant.consequence_profile)) {
+                errors.push_back("plant " + plant.id + " consequence profile: " + profile_error);
+            }
         }
     }
     for (const ScenarioWaterEvent& ev : water_events) {

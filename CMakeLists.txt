@@ -18,6 +18,7 @@ add_library(cannaville_sim
     Simulation/LeafEnergy/LeafEnergy.cpp
     Simulation/RootZone/RootZoneWater.cpp
     Simulation/RootZone/HydraulicLimitation.cpp
+    Simulation/Consequences/ConsequenceState.cpp
 )
 
 target_include_directories(cannaville_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -40,6 +41,13 @@ target_link_libraries(cannaville-p1b5-tests PRIVATE cannaville_sim)
 add_executable(cannaville-p1b5-benchmark Tools/P1B5Benchmark.cpp)
 target_link_libraries(cannaville-p1b5-benchmark PRIVATE cannaville_sim)
 
+add_executable(cannaville-p2-tests Tests/P2Tests.cpp)
+target_link_libraries(cannaville-p2-tests PRIVATE cannaville_sim)
+
+add_executable(cannaville-p2-benchmark Tools/P2Benchmark.cpp)
+target_link_libraries(cannaville-p2-benchmark PRIVATE cannaville_sim)
+
 enable_testing()
 add_test(NAME cannaville-tests COMMAND cannaville-tests)
 add_test(NAME cannaville-p1b5-tests COMMAND cannaville-p1b5-tests)
+add_test(NAME cannaville-p2-tests COMMAND cannaville-p2-tests)

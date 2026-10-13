@@ -106,8 +106,68 @@
               "calibration_status": {"type": "string", "minLength": 1},
               "valid_domain": {"type": "string", "minLength": 1}
             }
+          },
+          "consequence_profile": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["profile_id", "stages", "water", "thermal", "radiation", "presentation", "source", "evidence_classification", "calibration_status", "valid_domain"],
+            "properties": {
+              "profile_id": {"type": "string", "minLength": 1},
+              "model_version": {"type": "string", "minLength": 1},
+              "stages": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["stage", "required_opportunity_s", "assimilation_reference_umol_m2_s"],
+                  "properties": {
+                    "stage": {"enum": ["seedling", "vegetative", "flowering", "harvest_ready"]},
+                    "required_opportunity_s": {"type": "number", "exclusiveMinimum": 0},
+                    "assimilation_reference_umol_m2_s": {"type": "number", "exclusiveMinimum": 0},
+                    "minimum_elapsed_stage_s": {"type": ["number", "null"], "minimum": 0},
+                    "minimum_dark_duration_s": {"type": ["number", "null"], "minimum": 0}
+                  }
+                }
+              },
+              "water": {"$ref": "#/$defs/consequenceExposureProfile"},
+              "thermal": {"$ref": "#/$defs/consequenceExposureProfile"},
+              "radiation": {"$ref": "#/$defs/consequenceExposureProfile"},
+              "presentation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["stress_onset", "recovery_onset", "damage_onset", "critical_onset", "thriving_opportunity"],
+                "properties": {
+                  "stress_onset": {"type": "number", "minimum": 0, "maximum": 1},
+                  "recovery_onset": {"type": "number", "minimum": 0, "maximum": 1},
+                  "damage_onset": {"type": "number", "minimum": 0, "maximum": 1},
+                  "critical_onset": {"type": "number", "minimum": 0, "maximum": 1},
+                  "thriving_opportunity": {"type": "number", "minimum": 0, "maximum": 1}
+                }
+              },
+              "source": {"type": "string", "minLength": 1},
+              "evidence_classification": {"type": "string", "minLength": 1},
+              "calibration_status": {"type": "string", "minLength": 1},
+              "valid_domain": {"type": "string", "minLength": 1}
+            }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "consequenceExposureProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["onset", "full", "critical", "recovery_rate_per_s", "damage_onset", "damage_scale_s"],
+      "properties": {
+        "onset": {"type": "number"},
+        "full": {"type": "number"},
+        "critical": {"type": "number", "minimum": 0, "maximum": 1},
+        "recovery_rate_per_s": {"type": "number", "minimum": 0},
+        "damage_onset": {"type": "number", "minimum": 0, "maximum": 1},
+        "damage_scale_s": {"type": "number", "exclusiveMinimum": 0}
       }
     }
   }

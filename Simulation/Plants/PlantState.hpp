@@ -13,6 +13,7 @@
 #include "Simulation/Treatments/TreatmentState.hpp"
 #include "Simulation/GasExchange/GasExchange.hpp"
 #include "Simulation/LeafEnergy/LeafEnergy.hpp"
+#include "Simulation/Consequences/ConsequenceState.hpp"
 
 #include <cstdint>
 #include <string>
@@ -91,6 +92,9 @@ struct PlantState {
     PlantHistoryState history;
     PlantStochasticState stochastic;
     leafenergy::LeafEnergyProfile leaf_energy_profile;
+    consequences::PlantConsequenceProfile consequence_profile;
+    consequences::PlantConsequenceState consequence_state;
+    consequences::PlantConsequencePresentation consequence_presentation;
 };
 
 } // namespace cannaville::plants

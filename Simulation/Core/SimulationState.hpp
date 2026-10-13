@@ -67,6 +67,7 @@ struct ObservablePlantState {
     plants::GrowthStage displayed_growth_stage{plants::GrowthStage::Seedling};
     bool interaction_available{false};
     std::string readiness_label;
+    consequences::PlantConsequencePresentation consequence;
 };
 
 struct ObservableSimulationState {

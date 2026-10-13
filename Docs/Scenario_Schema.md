@@ -40,6 +40,16 @@ Plant fields:
 - `room_id`: referenced room identifier
 - `cultivar_id`: genetics reference identifier, not a biological model
 - `x_m`, `y_m`, `z_m`: plant position in metres in the room coordinate system
+- `consequence_profile`: optional explicit P2 profile. When present it must define
+  all four ordered stages, assimilation references, water/thermal/radiation exposure
+  policies, presentation thresholds, and source/evidence/calibration metadata. P2
+  profiles are configuration, not universal Cannabis defaults.
+
+P2 consequence profile units are explicit: opportunity budgets and durations are
+seconds, assimilation references are micromoles CO2 per square metre per second,
+severity and thresholds are dimensionless fractions in `[0,1]`, recovery rates are
+per second, and radiation thresholds are absorbed shortwave energy in watts per
+square metre. Synthetic profiles must be marked `SYNTHETIC_TEST_VALUE`.
 
 The bootstrap rejects unlabeled alternatives such as `fixed_timestep_hours`, non-positive dimensions, duplicate identifiers, unknown room references, out-of-bounds plant locations, invalid RH, invalid pressure, invalid PPFD, and overlapping lighting segments. Unconfigured rooms remain supported for P0 compatibility, but their cell physics are explicitly unavailable rather than populated with guessed defaults.
 
