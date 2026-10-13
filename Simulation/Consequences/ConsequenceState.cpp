@@ -412,22 +412,34 @@ void integrate_segment(
         }
         const double required = current_profile->required_opportunity_s;
         const double opportunity_remaining = std::max(0.0, required - state.stage_opportunity_accumulated_s);
-        const double time_to_opportunity = opportunity_signal > kEpsilon
-            ? opportunity_remaining / opportunity_signal : std::numeric_limits<double>::infinity();
+        const double time_to_opportunity = opportunity_remaining <= kEpsilon
+            ? 0.0
+            : (opportunity_signal > kEpsilon
+                ? opportunity_remaining / opportunity_signal
+                : std::numeric_limits<double>::infinity());
         const double time_to_minimum = current_profile->minimum_elapsed_stage_s.has_value()
             ? std::max(0.0, *current_profile->minimum_elapsed_stage_s - state.stage_elapsed_s)
             : 0.0;
-        const bool photoperiod_gate = current_profile->minimum_dark_duration_s.has_value() &&
-            inputs.accumulated_dark_duration_s < *current_profile->minimum_dark_duration_s;
-        if (photoperiod_gate) {
-            integrate_opportunity(remaining);
-            state.stage_opportunity_accumulated_s = std::min(required,
-                state.stage_opportunity_accumulated_s + opportunity_signal * remaining);
-            state.stage_elapsed_s += remaining;
-            remaining = 0.0;
-            break;
+        double time_to_dark_gate = 0.0;
+        if (current_profile->minimum_dark_duration_s.has_value()) {
+            const double dark_elapsed_before_subinterval = inputs.segment_is_dark
+                ? inputs.duration_s - remaining : 0.0;
+            const double accumulated_dark_at_subinterval_start =
+                inputs.accumulated_dark_duration_at_segment_start_s + dark_elapsed_before_subinterval;
+            const double dark_remaining = *current_profile->minimum_dark_duration_s -
+                accumulated_dark_at_subinterval_start;
+            if (dark_remaining <= 0.0) {
+                time_to_dark_gate = 0.0;
+            } else if (inputs.segment_is_dark && dark_remaining <= remaining + kEpsilon) {
+                time_to_dark_gate = dark_remaining;
+            } else {
+                // The threshold cannot be crossed in this fixed-forcing
+                // segment. Keep the gate unsatisfied and carry the completed
+                // stage into the next segment without inventing a transition.
+                time_to_dark_gate = std::numeric_limits<double>::infinity();
+            }
         }
-        const double transition_time = std::max(time_to_opportunity, time_to_minimum);
+        const double transition_time = std::max({time_to_opportunity, time_to_minimum, time_to_dark_gate});
         if (!std::isfinite(transition_time) || transition_time > remaining + kEpsilon) {
             integrate_opportunity(remaining);
             state.stage_opportunity_accumulated_s = std::min(required,

@@ -143,7 +143,8 @@ struct SegmentInputs {
     double realized_water_mol{0.0};
     std::optional<double> leaf_temperature_c;
     std::optional<double> absorbed_shortwave_w_m2;
-    double accumulated_dark_duration_s{0.0};
+    double accumulated_dark_duration_at_segment_start_s{0.0};
+    bool segment_is_dark{false};
     std::string gas_exchange_status;
     std::string transpiration_status;
 };

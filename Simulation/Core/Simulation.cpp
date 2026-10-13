@@ -71,6 +71,15 @@ std::optional<lighting::LightingScheduleSegment> scheduled_light_at(
     return std::nullopt;
 }
 
+struct SegmentLightingContext {
+    double accumulated_dark_duration_at_start_s{0.0};
+    bool segment_is_dark{false};
+};
+
+std::string lighting_context_key(const RoomState& room, std::size_t cell_index) {
+    return room.id + "/cell-index-" + std::to_string(cell_index);
+}
+
 std::string transpiration_status_for(gasexchange::ConvergenceStatus status) {
     switch (status) {
         case gasexchange::ConvergenceStatus::MissingGasExchangeProfile: return "missing_gas_exchange_profile";
@@ -346,6 +355,17 @@ void Simulation::advance_fixed_step() {
                         }
                     }
                 }
+            }
+        }
+
+        std::unordered_map<std::string, SegmentLightingContext> segment_lighting_context;
+        for (const RoomState& room : state_.rooms) {
+            for (std::size_t cell_index = 0; cell_index < room.cells.size(); ++cell_index) {
+                const RoomCellState& cell = room.cells[cell_index];
+                const auto scheduled_light = scheduled_light_at(cell.lighting_schedule, current_time);
+                segment_lighting_context[lighting_context_key(room, cell_index)] = SegmentLightingContext{
+                    cell.lighting.accumulated_dark_duration.value,
+                    scheduled_light.has_value() && scheduled_light->ppfd.value <= 0.0};
             }
         }
 
@@ -672,7 +692,18 @@ void Simulation::advance_fixed_step() {
                 consequence_inputs.leaf_temperature_c = plant.sampled_environment.leaf_temperature->value;
             }
             consequence_inputs.absorbed_shortwave_w_m2 = plant.latent.leaf_energy.absorbed_shortwave_w_m2;
-            consequence_inputs.accumulated_dark_duration_s = plant.sampled_lighting.accumulated_dark_duration.value;
+            const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
+                return room.id == plant.location.room_id;
+            });
+            if (room_it != state_.rooms.end() && !room_it->cells.empty()) {
+                const std::size_t cell_index = cell_index_for(*room_it, plant.location.x, plant.location.y);
+                const auto context_it = segment_lighting_context.find(lighting_context_key(*room_it, cell_index));
+                if (context_it != segment_lighting_context.end()) {
+                    consequence_inputs.accumulated_dark_duration_at_segment_start_s =
+                        context_it->second.accumulated_dark_duration_at_start_s;
+                    consequence_inputs.segment_is_dark = context_it->second.segment_is_dark;
+                }
+            }
             consequence_inputs.gas_exchange_status = gasexchange::to_string(plant.latent.gas_exchange.status);
             consequence_inputs.transpiration_status = plant.latent.transpiration.status;
             consequences::integrate_segment(
