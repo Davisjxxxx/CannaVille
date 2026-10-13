@@ -48,6 +48,13 @@ struct SegmentDiagnostic {
     double post_segment_storage_m3{0.0};
     std::string gas_exchange_status;
     std::string transpiration_status;
+    std::string consequence_status;
+    double opportunity_signal_0_1{0.0};
+    double water_severity_0_1{0.0};
+    double thermal_severity_0_1{0.0};
+    double radiation_severity_0_1{0.0};
+    std::string consequence_stage;
+    double consequence_stage_progress_0_1{0.0};
     std::optional<double> leaf_temperature_c;
     std::optional<double> leaf_vpd_kpa;
     std::optional<double> absorbed_shortwave_w_m2;

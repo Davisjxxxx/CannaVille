@@ -89,6 +89,26 @@ std::string transpiration_status_for(gasexchange::ConvergenceStatus status) {
     }
 }
 
+consequences::DevelopmentStage consequence_stage_for(plants::GrowthStage stage) {
+    switch (stage) {
+        case plants::GrowthStage::Seedling: return consequences::DevelopmentStage::Seedling;
+        case plants::GrowthStage::Vegetative: return consequences::DevelopmentStage::Vegetative;
+        case plants::GrowthStage::Flowering: return consequences::DevelopmentStage::Flowering;
+        case plants::GrowthStage::Harvest: return consequences::DevelopmentStage::HarvestReady;
+    }
+    return consequences::DevelopmentStage::Seedling;
+}
+
+plants::GrowthStage plant_stage_for(consequences::DevelopmentStage stage) {
+    switch (stage) {
+        case consequences::DevelopmentStage::Seedling: return plants::GrowthStage::Seedling;
+        case consequences::DevelopmentStage::Vegetative: return plants::GrowthStage::Vegetative;
+        case consequences::DevelopmentStage::Flowering: return plants::GrowthStage::Flowering;
+        case consequences::DevelopmentStage::HarvestReady: return plants::GrowthStage::Harvest;
+    }
+    return plants::GrowthStage::Seedling;
+}
+
 } // namespace
 
 Simulation::Simulation(const Scenario& scenario, std::uint64_t seed) {
@@ -212,6 +232,9 @@ void Simulation::initialize(const Scenario& scenario, std::uint64_t seed) {
         if (definition.effective_transpiring_leaf_area_m2) plant.latent.effective_leaf_area_m2 = definition.effective_transpiring_leaf_area_m2;
         if (definition.leaf_characteristic_dimension_m) plant.latent.leaf_characteristic_dimension_m = definition.leaf_characteristic_dimension_m;
         plant.leaf_energy_profile = definition.leaf_energy_profile;
+        plant.consequence_profile = definition.consequence_profile;
+        plant.consequence_state.model_version = plant.consequence_profile.model_version;
+        plant.consequence_state.stage = consequence_stage_for(plant.latent.growth_stage);
         const auto room_it = std::find_if(state_.rooms.begin(), state_.rooms.end(), [&](const RoomState& room) {
             return room.id == plant.location.room_id;
         });
@@ -629,6 +652,51 @@ void Simulation::advance_fixed_step() {
             }
         }
 
+        // P2 consumes the final segment result only after shared water allocation
+        // has populated realized and unmet demand for every requesting plant.
+        for (plants::PlantState& plant : state_.plants) {
+            if (!plant.consequence_profile.is_configured) continue;
+            consequences::SegmentInputs consequence_inputs;
+            consequence_inputs.start_time_s = current_time;
+            consequence_inputs.duration_s = segment_duration;
+            if (plant.latent.gas_exchange.status == gasexchange::ConvergenceStatus::Converged) {
+                consequence_inputs.net_assimilation_umol_m2_s = plant.latent.gas_exchange.net_assimilation.value;
+            }
+            consequence_inputs.hydraulic_beta = plant.latent.gas_exchange.beta_hydraulic;
+            consequence_inputs.water_allocation_available = plant.latent.transpiration.available;
+            consequence_inputs.requested_water_mol = plant.latent.requested_water_mol;
+            consequence_inputs.realized_water_mol = plant.latent.realized_water_mol;
+            if (plant.latent.leaf_energy.leaf_temperature.has_value()) {
+                consequence_inputs.leaf_temperature_c = plant.latent.leaf_energy.leaf_temperature->value;
+            } else if (plant.sampled_environment.leaf_temperature.has_value()) {
+                consequence_inputs.leaf_temperature_c = plant.sampled_environment.leaf_temperature->value;
+            }
+            consequence_inputs.absorbed_shortwave_w_m2 = plant.latent.leaf_energy.absorbed_shortwave_w_m2;
+            consequence_inputs.accumulated_dark_duration_s = plant.sampled_lighting.accumulated_dark_duration.value;
+            consequence_inputs.gas_exchange_status = gasexchange::to_string(plant.latent.gas_exchange.status);
+            consequence_inputs.transpiration_status = plant.latent.transpiration.status;
+            consequences::integrate_segment(
+                plant.consequence_state,
+                plant.consequence_presentation,
+                plant.consequence_profile,
+                consequence_inputs);
+            plant.latent.growth_stage = plant_stage_for(plant.consequence_state.stage);
+            plant.observable.displayed_growth_stage = plant.latent.growth_stage;
+            plant.derived.readiness_label = plant.consequence_presentation.derived_condition;
+
+            const auto diagnostic_it = diagnostic_index_by_plant.find(plant.id);
+            if (diagnostic_it != diagnostic_index_by_plant.end()) {
+                SegmentDiagnostic& diagnostic = last_step_segment_trace_[diagnostic_it->second];
+                diagnostic.consequence_status = plant.consequence_state.integration_status;
+                diagnostic.opportunity_signal_0_1 = plant.consequence_state.current_opportunity_signal_0_1;
+                diagnostic.water_severity_0_1 = plant.consequence_state.water_current_severity_0_1;
+                diagnostic.thermal_severity_0_1 = plant.consequence_state.thermal_current_severity_0_1;
+                diagnostic.radiation_severity_0_1 = plant.consequence_state.radiation_current_severity_0_1;
+                diagnostic.consequence_stage = consequences::to_string(plant.consequence_state.stage);
+                diagnostic.consequence_stage_progress_0_1 = plant.consequence_state.stage_progress_0_1;
+            }
+        }
+
         current_time = next_boundary;
     }
 
@@ -674,6 +742,7 @@ ObservableSimulationState Simulation::observable_state() const {
             plant.observable.displayed_growth_stage,
             plant.observable.interaction_available,
             plant.derived.readiness_label,
+            plant.consequence_presentation,
         });
     }
     return observable;
@@ -728,7 +797,8 @@ void Simulation::load_serialized_state(std::string_view serialized) {
             plant.latent.gas_exchange.profile_id,
             plant.latent.effective_leaf_area_m2,
             plant.latent.leaf_characteristic_dimension_m,
-            plant.leaf_energy_profile
+            plant.leaf_energy_profile,
+            plant.consequence_profile
         });
     }
     rng_.restore_state(state_.stochastic.seed, state_.stochastic.rng_state);
@@ -838,7 +908,7 @@ std::string Simulation::root_zone_csv_row() const {
 }
 
 std::string Simulation::plant_physiology_csv_header() const {
-    return "timestamp_s,plant_id,room_id,x,y,z,cell_id,root_zone_id,ppfd,pressure,airflow,leaf_temperature,leaf_vpd,vwc,matric_potential,hydraulic_status,beta,g1_reference,g1_effective,assimilation,gs,gb,transpiration_flux,effective_leaf_area,requested_water,realized_water,unmet_demand,gas_exchange_status,transpiration_status,leaf_temperature_mode,leaf_temperature_source,incident_shortwave_w_m2,radiative_surroundings_temperature_c,shortwave_absorptance,longwave_emissivity,surface_factor,area_basis,absorbed_shortwave_w_m2,net_longwave_w_m2,sensible_heat_flux_w_m2,latent_heat_flux_w_m2,energy_residual_w_m2,leaf_energy_iterations,leaf_energy_status,leaf_energy_model_version\n";
+    return "timestamp_s,plant_id,room_id,x,y,z,cell_id,root_zone_id,ppfd,pressure,airflow,leaf_temperature,leaf_vpd,vwc,matric_potential,hydraulic_status,beta,g1_reference,g1_effective,assimilation,gs,gb,transpiration_flux,effective_leaf_area,requested_water,realized_water,unmet_demand,gas_exchange_status,transpiration_status,leaf_temperature_mode,leaf_temperature_source,incident_shortwave_w_m2,radiative_surroundings_temperature_c,shortwave_absorptance,longwave_emissivity,surface_factor,area_basis,absorbed_shortwave_w_m2,net_longwave_w_m2,sensible_heat_flux_w_m2,latent_heat_flux_w_m2,energy_residual_w_m2,leaf_energy_iterations,leaf_energy_status,leaf_energy_model_version,p2_model_version,consequence_stage,stage_progress_0_1,stage_opportunity_accumulated_s,stage_elapsed_s,potential_opportunity_s,achieved_opportunity_s,lost_opportunity_s,opportunity_signal_0_1,water_current_severity_0_1,thermal_current_severity_0_1,radiation_current_severity_0_1,water_exposure_dose_s,thermal_exposure_dose_s,radiation_exposure_dose_s,water_recovery_0_1,thermal_recovery_0_1,radiation_recovery_0_1,water_damage_0_1,thermal_damage_0_1,radiation_damage_0_1,size_proxy_0_1,vigor_signal_0_1,wilt_severity_0_1,growth_slowdown_0_1,heat_stress_severity_0_1,radiation_stress_severity_0_1,damage_severity_0_1,recovery_severity_0_1,derived_condition,consequence_status,opportunity_available,water_consequence_available,thermal_consequence_available,radiation_consequence_available,reason_codes\n";
 }
 
 std::string Simulation::plant_physiology_csv_row() const {
@@ -926,7 +996,60 @@ std::string Simulation::plant_physiology_csv_row() const {
         output += opt_string(plant.latent.leaf_energy.energy_residual_w_m2) + ",";
         output += std::to_string(plant.latent.leaf_energy.solver_iterations) + ",";
         output += plant.latent.leaf_energy.status + ",";
-        output += plant.latent.leaf_energy.model_version + "\n";
+        output += plant.latent.leaf_energy.model_version + ",";
+        const auto& consequence = plant.consequence_state;
+        const auto& consequence_view = plant.consequence_presentation;
+        const bool p2_configured = plant.consequence_profile.is_configured;
+        const auto p2_number = [p2_configured](double value) {
+            return p2_configured ? std::to_string(value) : std::string{};
+        };
+        output += p2_configured ? consequence.model_version : "";
+        output += "," + (p2_configured ? consequences::to_string(consequence.stage) : "");
+        output += "," + p2_number(consequence.stage_progress_0_1);
+        output += "," + p2_number(consequence.stage_opportunity_accumulated_s);
+        output += "," + p2_number(consequence.stage_elapsed_s);
+        output += "," + p2_number(consequence.potential_opportunity_s);
+        output += "," + p2_number(consequence.achieved_opportunity_s);
+        output += "," + p2_number(consequence.lost_opportunity_s);
+        output += "," + p2_number(consequence.current_opportunity_signal_0_1);
+        output += "," + p2_number(consequence.water_current_severity_0_1);
+        output += "," + p2_number(consequence.thermal_current_severity_0_1);
+        output += "," + p2_number(consequence.radiation_current_severity_0_1);
+        output += "," + p2_number(consequence.water_exposure_dose_s);
+        output += "," + p2_number(consequence.thermal_exposure_dose_s);
+        output += "," + p2_number(consequence.radiation_exposure_dose_s);
+        output += "," + p2_number(consequence.water_recovery_0_1);
+        output += "," + p2_number(consequence.thermal_recovery_0_1);
+        output += "," + p2_number(consequence.radiation_recovery_0_1);
+        output += "," + p2_number(consequence.water_damage_0_1);
+        output += "," + p2_number(consequence.thermal_damage_0_1);
+        output += "," + p2_number(consequence.radiation_damage_0_1);
+        output += "," + p2_number(consequence_view.size_proxy_0_1);
+        output += "," + p2_number(consequence_view.vigor_signal_0_1);
+        output += "," + p2_number(consequence_view.wilt_severity_0_1);
+        output += "," + p2_number(consequence_view.growth_slowdown_0_1);
+        output += "," + p2_number(consequence_view.heat_stress_severity_0_1);
+        output += "," + p2_number(consequence_view.radiation_stress_severity_0_1);
+        output += "," + p2_number(consequence_view.damage_severity_0_1);
+        output += "," + p2_number(consequence_view.recovery_severity_0_1);
+        output += "," + (p2_configured ? consequence_view.derived_condition : "");
+        output += "," + (p2_configured ? consequence.integration_status : "profile_unconfigured");
+        output += ",";
+        output += p2_configured ? (consequence.opportunity_available ? "1" : "0") : "";
+        output += ",";
+        output += p2_configured ? (consequence.water_available ? "1" : "0") : "";
+        output += ",";
+        output += p2_configured ? (consequence.thermal_available ? "1" : "0") : "";
+        output += ",";
+        output += p2_configured ? (consequence.radiation_available ? "1" : "0") : "";
+        std::string reason_codes;
+        if (p2_configured) {
+            for (std::size_t index = 0; index < consequence_view.reason_codes.size(); ++index) {
+                if (index != 0) reason_codes += "|";
+                reason_codes += consequence_view.reason_codes[index].reason_code;
+            }
+        }
+        output += "," + reason_codes + "\n";
     }
     return output;
 }

@@ -8,6 +8,7 @@
 | `Environment` | room-cell measurements plus sourced vapor-pressure/VPD derivations | later causal room and cell environmental models |
 | `Lighting` | explicit PPFD schedules, DLI integration, photoperiod bookkeeping | fixture/control models and later canopy sampling models |
 | `Plants` | plant identity, location, state separation | plant development and phenotype models |
+| `Consequences` | deterministic stage/opportunity/exposure history and derived player-facing projection | later calibrated growth consequences and intervention outcomes |
 | `RootZone` | moisture, root-zone temperature, pH, EC state shape | substrate, root, water, oxygen, and root-zone models |
 | `Nutrition` | solution/profile identity and model status | nutrient availability and uptake models |
 | `Genetics` | cultivar/genotype identity shape | genotype, inheritance, and trait response models |
@@ -107,10 +108,34 @@ single closure review, the roadmap pivots to P2 — Plant Growth and Gameplay
 Consequence Layer. No growth, stress, yield, quality, pest, disease, or treatment
 model is part of this boundary.
 
+## P2 growth and gameplay consequence boundary
+
+P2 consumes only the final accepted P1 result for each exact fixed-forcing segment:
+
+```text
+P1 environment and physiology
+  -> final transpiration request and shared water allocation
+  -> P2 opportunity, exposure, recovery, and persistent-damage integration
+  -> derived symptoms, reason records, and player condition
+```
+
+P2 owns the history-dependent consequence state in `Simulation/Consequences`. It
+does not modify P1 equations, rerun allocation, or feed presentation values back
+into physiology. Its authoritative state is decomposed into stage progress,
+opportunity history, and channel-specific water/thermal/radiation state. There is
+no authoritative `health`, `health_score`, or `overall_health` scalar.
+
+Stage budgets, assimilation references, exposure bands, recovery rates, damage
+scales, and presentation thresholds are explicit profile configuration. They are
+not universal Cannabis constants; unresolved biological values remain
+`CALIBRATION_REQUIRED`, and synthetic values are restricted to test fixtures.
+P2 state is serializable at segment boundaries and remains headless, deterministic,
+and independent of Unreal, rendering, animation, and UI.
+
 ## Current intentionally inert behavior
 
 - fixed-step advancement changes only clock and historical elapsed state
 - plants sample the spatial cell at their location
 - player actions are accepted at the interface but have no model effect
 - no wall-clock value is read
-- no biological equation or random biological event is executed
+- no additional P1 biological equation or random biological event is executed

@@ -220,6 +220,226 @@ void read_optional_leaf_energy_state(const json::Value& object, leafenergy::Leaf
     if (object.find("model_version") != nullptr) value.model_version = string_field(object, "model_version");
 }
 
+json::Value consequence_profile_json(const consequences::PlantConsequenceProfile& profile) {
+    json::Value::Array stages;
+    for (const consequences::StageProfile& stage : profile.stages) {
+        stages.push_back(json::Value({
+            {"stage", string_value(consequences::to_string(stage.stage))},
+            {"required_opportunity_s", number(stage.required_opportunity_s)},
+            {"assimilation_reference_umol_m2_s", number(stage.assimilation_reference_umol_m2_s)},
+            {"minimum_elapsed_stage_s", stage.minimum_elapsed_stage_s.has_value() ? number(*stage.minimum_elapsed_stage_s) : json::Value(nullptr)},
+            {"minimum_dark_duration_s", stage.minimum_dark_duration_s.has_value() ? number(*stage.minimum_dark_duration_s) : json::Value(nullptr)},
+        }));
+    }
+    const auto channel_json = [](const consequences::ExposureProfile& channel) {
+        return json::Value({
+            {"onset", number(channel.onset)},
+            {"full", number(channel.full)},
+            {"critical", number(channel.critical)},
+            {"recovery_rate_per_s", number(channel.recovery_rate_per_s)},
+            {"damage_onset", number(channel.damage_onset)},
+            {"damage_scale_s", number(channel.damage_scale_s)},
+        });
+    };
+    return json::Value({
+        {"profile_id", string_value(profile.profile_id)},
+        {"model_version", string_value(profile.model_version)},
+        {"stages", json::Value(std::move(stages))},
+        {"water", channel_json(profile.water)},
+        {"thermal", channel_json(profile.thermal)},
+        {"radiation", channel_json(profile.radiation)},
+        {"presentation", json::Value({
+            {"stress_onset", number(profile.presentation.stress_onset)},
+            {"recovery_onset", number(profile.presentation.recovery_onset)},
+            {"damage_onset", number(profile.presentation.damage_onset)},
+            {"critical_onset", number(profile.presentation.critical_onset)},
+            {"thriving_opportunity", number(profile.presentation.thriving_opportunity)},
+        })},
+        {"source", string_value(profile.source)},
+        {"evidence_classification", string_value(profile.evidence_classification)},
+        {"calibration_status", string_value(profile.calibration_status)},
+        {"valid_domain", string_value(profile.valid_domain)},
+        {"is_configured", json::Value(profile.is_configured)},
+    });
+}
+
+void read_consequence_profile(const json::Value& object, consequences::PlantConsequenceProfile& profile) {
+    profile.profile_id = string_field(object, "profile_id");
+    if (const json::Value* value = object.find("model_version"); value != nullptr) profile.model_version = string_field(object, "model_version");
+    profile.source = string_field(object, "source");
+    profile.evidence_classification = string_field(object, "evidence_classification");
+    profile.calibration_status = string_field(object, "calibration_status");
+    profile.valid_domain = string_field(object, "valid_domain");
+    const auto& stages = object.require("stages");
+    for (const auto& stage_value : stages.as_array()) {
+        consequences::StageProfile stage;
+        stage.stage = consequences::development_stage_from_string(string_field(stage_value, "stage"));
+        stage.required_opportunity_s = number_field(stage_value, "required_opportunity_s");
+        stage.assimilation_reference_umol_m2_s = number_field(stage_value, "assimilation_reference_umol_m2_s");
+        if (const json::Value* value = stage_value.find("minimum_elapsed_stage_s"); value != nullptr && !value->is_null()) stage.minimum_elapsed_stage_s = number_field(stage_value, "minimum_elapsed_stage_s");
+        if (const json::Value* value = stage_value.find("minimum_dark_duration_s"); value != nullptr && !value->is_null()) stage.minimum_dark_duration_s = number_field(stage_value, "minimum_dark_duration_s");
+        profile.stages.push_back(stage);
+    }
+    const auto read_channel = [](const json::Value& object_value, const char* name, consequences::ExposureProfile& channel) {
+        const auto& value = object_value.require(name);
+        channel.onset = number_field(value, "onset");
+        channel.full = number_field(value, "full");
+        channel.critical = number_field(value, "critical");
+        channel.recovery_rate_per_s = number_field(value, "recovery_rate_per_s");
+        channel.damage_onset = number_field(value, "damage_onset");
+        channel.damage_scale_s = number_field(value, "damage_scale_s");
+    };
+    read_channel(object, "water", profile.water);
+    read_channel(object, "thermal", profile.thermal);
+    read_channel(object, "radiation", profile.radiation);
+    const auto& presentation = object.require("presentation");
+    profile.presentation.stress_onset = number_field(presentation, "stress_onset");
+    profile.presentation.recovery_onset = number_field(presentation, "recovery_onset");
+    profile.presentation.damage_onset = number_field(presentation, "damage_onset");
+    profile.presentation.critical_onset = number_field(presentation, "critical_onset");
+    profile.presentation.thriving_opportunity = number_field(presentation, "thriving_opportunity");
+    if (const json::Value* configured = object.find("is_configured"); configured != nullptr) profile.is_configured = bool_field(object, "is_configured");
+    else profile.is_configured = true;
+}
+
+json::Value consequence_state_json(const consequences::PlantConsequenceState& state) {
+    return json::Value({
+        {"model_version", string_value(state.model_version)},
+        {"stage", string_value(consequences::to_string(state.stage))},
+        {"stage_progress_0_1", number(state.stage_progress_0_1)},
+        {"stage_opportunity_accumulated_s", number(state.stage_opportunity_accumulated_s)},
+        {"stage_elapsed_s", number(state.stage_elapsed_s)},
+        {"potential_opportunity_s", number(state.potential_opportunity_s)},
+        {"achieved_opportunity_s", number(state.achieved_opportunity_s)},
+        {"lost_opportunity_s", number(state.lost_opportunity_s)},
+        {"current_opportunity_signal_0_1", number(state.current_opportunity_signal_0_1)},
+        {"opportunity_available", json::Value(state.opportunity_available)},
+        {"water_current_severity_0_1", number(state.water_current_severity_0_1)},
+        {"thermal_current_severity_0_1", number(state.thermal_current_severity_0_1)},
+        {"radiation_current_severity_0_1", number(state.radiation_current_severity_0_1)},
+        {"water_available", json::Value(state.water_available)},
+        {"thermal_available", json::Value(state.thermal_available)},
+        {"radiation_available", json::Value(state.radiation_available)},
+        {"water_exposure_dose_s", number(state.water_exposure_dose_s)},
+        {"thermal_exposure_dose_s", number(state.thermal_exposure_dose_s)},
+        {"radiation_exposure_dose_s", number(state.radiation_exposure_dose_s)},
+        {"water_damage_dose_s", number(state.water_damage_dose_s)},
+        {"thermal_damage_dose_s", number(state.thermal_damage_dose_s)},
+        {"radiation_damage_dose_s", number(state.radiation_damage_dose_s)},
+        {"water_recovery_0_1", number(state.water_recovery_0_1)},
+        {"thermal_recovery_0_1", number(state.thermal_recovery_0_1)},
+        {"radiation_recovery_0_1", number(state.radiation_recovery_0_1)},
+        {"water_damage_0_1", number(state.water_damage_0_1)},
+        {"thermal_damage_0_1", number(state.thermal_damage_0_1)},
+        {"radiation_damage_0_1", number(state.radiation_damage_0_1)},
+        {"integration_status", string_value(state.integration_status)},
+        {"last_integrated_simulation_time_s", number(state.last_integrated_simulation_time_s)},
+    });
+}
+
+void read_consequence_state(const json::Value& object, consequences::PlantConsequenceState& state) {
+    state.model_version = string_field(object, "model_version");
+    state.stage = consequences::development_stage_from_string(string_field(object, "stage"));
+    state.stage_progress_0_1 = number_field(object, "stage_progress_0_1");
+    state.stage_opportunity_accumulated_s = number_field(object, "stage_opportunity_accumulated_s");
+    state.stage_elapsed_s = number_field(object, "stage_elapsed_s");
+    state.potential_opportunity_s = number_field(object, "potential_opportunity_s");
+    state.achieved_opportunity_s = number_field(object, "achieved_opportunity_s");
+    state.lost_opportunity_s = number_field(object, "lost_opportunity_s");
+    state.current_opportunity_signal_0_1 = number_field(object, "current_opportunity_signal_0_1");
+    state.opportunity_available = bool_field(object, "opportunity_available");
+    state.water_current_severity_0_1 = number_field(object, "water_current_severity_0_1");
+    state.thermal_current_severity_0_1 = number_field(object, "thermal_current_severity_0_1");
+    state.radiation_current_severity_0_1 = number_field(object, "radiation_current_severity_0_1");
+    state.water_available = bool_field(object, "water_available");
+    state.thermal_available = bool_field(object, "thermal_available");
+    state.radiation_available = bool_field(object, "radiation_available");
+    state.water_exposure_dose_s = number_field(object, "water_exposure_dose_s");
+    state.thermal_exposure_dose_s = number_field(object, "thermal_exposure_dose_s");
+    state.radiation_exposure_dose_s = number_field(object, "radiation_exposure_dose_s");
+    state.water_damage_dose_s = number_field(object, "water_damage_dose_s");
+    state.thermal_damage_dose_s = number_field(object, "thermal_damage_dose_s");
+    state.radiation_damage_dose_s = number_field(object, "radiation_damage_dose_s");
+    state.water_recovery_0_1 = number_field(object, "water_recovery_0_1");
+    state.thermal_recovery_0_1 = number_field(object, "thermal_recovery_0_1");
+    state.radiation_recovery_0_1 = number_field(object, "radiation_recovery_0_1");
+    state.water_damage_0_1 = number_field(object, "water_damage_0_1");
+    state.thermal_damage_0_1 = number_field(object, "thermal_damage_0_1");
+    state.radiation_damage_0_1 = number_field(object, "radiation_damage_0_1");
+    state.integration_status = string_field(object, "integration_status");
+    state.last_integrated_simulation_time_s = number_field(object, "last_integrated_simulation_time_s");
+}
+
+json::Value consequence_presentation_json(const consequences::PlantConsequencePresentation& presentation) {
+    json::Value::Array reasons;
+    for (const auto& reason : presentation.reason_codes) {
+        json::Value::Array variables;
+        for (const auto& variable : reason.supporting_variables) {
+            variables.push_back(json::Value({
+                {"name", string_value(variable.name)},
+                {"unit", string_value(variable.unit)},
+                {"value", number(variable.value)},
+            }));
+        }
+        reasons.push_back(json::Value({
+            {"reason_code", string_value(reason.reason_code)},
+            {"severity_0_1", number(reason.severity_0_1)},
+            {"start_time_s", number(reason.start_time_s)},
+            {"duration_s", number(reason.duration_s)},
+            {"source_channel", string_value(reason.source_channel)},
+            {"status", string_value(reason.status)},
+            {"supporting_variables", json::Value(std::move(variables))},
+        }));
+    }
+    return json::Value({
+        {"growth_stage", string_value(consequences::to_string(presentation.growth_stage))},
+        {"stage_progress_0_1", number(presentation.stage_progress_0_1)},
+        {"size_proxy_0_1", number(presentation.size_proxy_0_1)},
+        {"vigor_signal_0_1", number(presentation.vigor_signal_0_1)},
+        {"wilt_severity_0_1", number(presentation.wilt_severity_0_1)},
+        {"growth_slowdown_0_1", number(presentation.growth_slowdown_0_1)},
+        {"heat_stress_severity_0_1", number(presentation.heat_stress_severity_0_1)},
+        {"radiation_stress_severity_0_1", number(presentation.radiation_stress_severity_0_1)},
+        {"damage_severity_0_1", number(presentation.damage_severity_0_1)},
+        {"recovery_severity_0_1", number(presentation.recovery_severity_0_1)},
+        {"derived_condition", string_value(presentation.derived_condition)},
+        {"reason_codes", json::Value(std::move(reasons))},
+    });
+}
+
+void read_consequence_presentation(const json::Value& object, consequences::PlantConsequencePresentation& presentation) {
+    presentation.growth_stage = consequences::development_stage_from_string(string_field(object, "growth_stage"));
+    presentation.stage_progress_0_1 = number_field(object, "stage_progress_0_1");
+    presentation.size_proxy_0_1 = number_field(object, "size_proxy_0_1");
+    presentation.vigor_signal_0_1 = number_field(object, "vigor_signal_0_1");
+    presentation.wilt_severity_0_1 = number_field(object, "wilt_severity_0_1");
+    presentation.growth_slowdown_0_1 = number_field(object, "growth_slowdown_0_1");
+    presentation.heat_stress_severity_0_1 = number_field(object, "heat_stress_severity_0_1");
+    presentation.radiation_stress_severity_0_1 = number_field(object, "radiation_stress_severity_0_1");
+    presentation.damage_severity_0_1 = number_field(object, "damage_severity_0_1");
+    presentation.recovery_severity_0_1 = number_field(object, "recovery_severity_0_1");
+    presentation.derived_condition = string_field(object, "derived_condition");
+    const json::Value* reasons = object.find("reason_codes");
+    if (reasons == nullptr) return;
+    for (const auto& reason_value : reasons->as_array()) {
+        consequences::ReasonRecord reason;
+        reason.reason_code = string_field(reason_value, "reason_code");
+        reason.severity_0_1 = number_field(reason_value, "severity_0_1");
+        reason.start_time_s = number_field(reason_value, "start_time_s");
+        reason.duration_s = number_field(reason_value, "duration_s");
+        reason.source_channel = string_field(reason_value, "source_channel");
+        reason.status = string_field(reason_value, "status");
+        const auto& variables = reason_value.require("supporting_variables");
+        for (const auto& variable_value : variables.as_array()) {
+            reason.supporting_variables.push_back(consequences::SupportingVariable{
+                string_field(variable_value, "name"),
+                string_field(variable_value, "unit"),
+                number_field(variable_value, "value")});
+        }
+        presentation.reason_codes.push_back(std::move(reason));
+    }
+}
+
 json::Value lighting_json(const lighting::LightingState& value) {
     return json::Value({
         {"ppfd_umol_per_m2_s", number(value.ppfd.value)},
@@ -378,6 +598,9 @@ json::Value plant_json(const plants::PlantState& plant) {
         {"sampled_lighting", lighting_json(plant.sampled_lighting)},
         {"root_zone_id", string_value(plant.root_zone_id)},
         {"leaf_energy_profile", leaf_energy_profile_json(plant.leaf_energy_profile)},
+        {"consequence_profile", consequence_profile_json(plant.consequence_profile)},
+        {"consequence_state", consequence_state_json(plant.consequence_state)},
+        {"consequence_presentation", consequence_presentation_json(plant.consequence_presentation)},
         {"nutrition", json::Value({
             {"solution_profile_id", string_value(plant.nutrition.solution_profile_id)},
             {"availability_model_initialized", json::Value(plant.nutrition.availability_model_initialized)},
@@ -472,6 +695,8 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
     read_lighting(object.require("sampled_lighting"), plant.sampled_lighting);
     const json::Value* profile = object.find("leaf_energy_profile");
     if (profile != nullptr && profile->is_object()) read_leaf_energy_profile(*profile, plant.leaf_energy_profile);
+    const json::Value* consequence_profile = object.find("consequence_profile");
+    if (consequence_profile != nullptr && consequence_profile->is_object()) read_consequence_profile(*consequence_profile, plant.consequence_profile);
     
     const json::Value* rz = object.find("root_zone_id");
     if (rz != nullptr && rz->is_string()) {
@@ -551,6 +776,10 @@ void read_plant(const json::Value& object, plants::PlantState& plant) {
         const auto* ud = latent.find("unmet_demand_mol");
         if (ud) plant.latent.unmet_demand_mol = ud->as_number();
     }
+    const json::Value* consequence_state = object.find("consequence_state");
+    if (consequence_state != nullptr && consequence_state->is_object()) read_consequence_state(*consequence_state, plant.consequence_state);
+    const json::Value* consequence_presentation = object.find("consequence_presentation");
+    if (consequence_presentation != nullptr && consequence_presentation->is_object()) read_consequence_presentation(*consequence_presentation, plant.consequence_presentation);
     const auto& observable = object.require("observable");
     plant.observable.displayed_growth_stage = stage_from_string(string_field(observable, "displayed_growth_stage"));
     plant.observable.interaction_available = bool_field(observable, "interaction_available");

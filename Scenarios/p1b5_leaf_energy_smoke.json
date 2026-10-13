@@ -65,7 +65,25 @@
         "evidence_classification": "SYNTHETIC_TEST_VALUE",
         "calibration_status": "SYNTHETIC_TEST_VALUE",
         "valid_domain": "engineering fixture; not biologically calibrated"
-      }
+        },
+        "consequence_profile": {
+          "profile_id": "synthetic_p2_cli_fixture",
+          "model_version": "p2_growth_consequences.synthetic_fixture.v1",
+          "stages": [
+            {"stage": "seedling", "required_opportunity_s": 864000, "assimilation_reference_umol_m2_s": 10},
+            {"stage": "vegetative", "required_opportunity_s": 864000, "assimilation_reference_umol_m2_s": 10},
+            {"stage": "flowering", "required_opportunity_s": 864000, "assimilation_reference_umol_m2_s": 10},
+            {"stage": "harvest_ready", "required_opportunity_s": 1, "assimilation_reference_umol_m2_s": 10}
+          ],
+          "water": {"onset": 0.2, "full": 0.8, "critical": 0.9, "recovery_rate_per_s": 0.0002777777778, "damage_onset": 0.4, "damage_scale_s": 864000},
+          "thermal": {"onset": 30, "full": 40, "critical": 0.9, "recovery_rate_per_s": 0.0002777777778, "damage_onset": 0.4, "damage_scale_s": 864000},
+          "radiation": {"onset": 500, "full": 1000, "critical": 0.9, "recovery_rate_per_s": 0.0002777777778, "damage_onset": 0.4, "damage_scale_s": 864000},
+          "presentation": {"stress_onset": 0.2, "recovery_onset": 0.2, "damage_onset": 0.2, "critical_onset": 0.9, "thriving_opportunity": 0.8},
+          "source": "P2 engineering CLI fixture",
+          "evidence_classification": "SYNTHETIC_TEST_VALUE",
+          "calibration_status": "SYNTHETIC_TEST_VALUE",
+          "valid_domain": "CLI smoke test only"
+        }
     }
   ]
 }
